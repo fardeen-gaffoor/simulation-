@@ -1,0 +1,70 @@
+# =============================================================================
+# rover_perception / ekf.yaml -- robot_localization config for module 4
+#
+#   ros2 launch rover_perception localization.launch.py
+#
+# Fuses wheel odometry (/odom, from gz's diff-drive in simulation / the drive
+# firmware on the real robot) with the IMU (/imu, NO magnetometer -- competition
+# rule) into /odometry/filtered.  There is no AMCL anywhere in this stack and no
+# map -> odom from the EKF: AprilTags do that (tag_localizer).
+#
+# publish_tf is FALSE by default and here is why:
+#   in simulation gz's diff-drive plugin already publishes odom -> base_link on
+#   /tf (bridged by module 2's bridges.yaml).  Two publishers of the same TF edge
+#   is a tf2 error, not a merge.  So the EKF's output is consumed as a *topic*
+#   by tag_localizer and by module 5, and the TF stays single-publisher.
+#   localization.launch.py takes `publish_tf:=true` for the real robot, where
+#   there is no gz and the EKF is the only source of odom -> base_link.
+#
+# two_d_mode: the rover is a planar skid-steer on flat sand; roll/pitch/z are
+# held at zero and only x, y, yaw (+ their rates) are estimated.
+# =============================================================================
+
+ekf_filter_node:
+  ros__parameters:
+    # -- runtime ------------------------------------------------------------
+    frequency: 30.0              # must exceed the odom/IMU rates
+    sensor_timeout: 0.1
+    two_d_mode: true
+    print_diagnostics: true      # mirrors health into /diagnostics, like module 4
+    publish_tf: false            # see the header: sim's gz owns odom -> base_link
+    publish_acceleration: false
+
+    # -- frame graph --------------------------------------------------------
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    world_frame: odom            # the EKF estimates odom -> base_link
+
+    # -- wheel odometry -----------------------------------------------------
+    odom0: /odom
+    odom0_config: [true,  true,  false,
+                   false, false, true,
+                   true,  true,  false,
+                   false, false, true,
+                   false, false, false]
+    odom0_queue_size: 10
+    odom0_nodelay: true
+    odom0_differential: false
+    odom0_relative: false
+    odom0_pose_rejection_threshold: 5.0
+    odom0_twist_rejection_threshold: 1.0
+
+    # -- IMU (no magnetometer) ---------------------------------------------
+    # Orientation from the IMU is only used for yaw-rate -> roll/pitch are left
+    # to two_d_mode, and the absolute yaw from a gyro-integrated orientation is
+    # NOT trusted as an absolute reference (it drifts); AprilTags fix yaw.
+    imu0: /imu
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  true,  true,  true,
+                  true,  true,  true]
+    imu0_queue_size: 10
+    imu0_nodelay: true
+    imu0_differential: false
+    imu0_relative: true
+    imu0_remove_gravitational_acceleration: true
+    imu0_pose_rejection_threshold: 5.0
+    imu0_twist_rejection_threshold: 1.0
+    imu0_acceleration_rejection_threshold: 5.0

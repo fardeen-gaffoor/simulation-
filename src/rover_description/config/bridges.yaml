@@ -1,0 +1,45 @@
+%YAML 1.2
+---
+# =============================================================================
+# rover_description / bridges.yaml -- ros_gz_bridge topic table (SIMULATION).
+#
+# This is the complete simulator <-> ROS interface for the rover.  On the real
+# robot these ROS topics are produced directly (rover_camera_driver for images,
+# the drive firmware for /odom + /tf + /joint_states) so no consumer changes.
+#
+# /clock is intentionally absent: cat_arena's arena.launch.py bridges it once
+# for the whole simulation (bridge_clock:=true).
+#
+# direction: gz_to_ros  -> "/topic@ros_type[gz_type"
+#            ros_to_gz  -> "/topic@ros_type]gz_type"
+# ros_topic and gz_topic must be identical (gz sensor <topic> is absolute).
+# =============================================================================
+schema_version: 1
+
+bridges:
+  # --- 4 plain RGB cameras: image + camera_info (module 2 requirement) -------
+  - {ros_topic: /cam_nav,        gz_topic: /cam_nav,        ros_type: sensor_msgs/msg/Image,      gz_type: gz.msgs.Image,      direction: gz_to_ros}
+  - {ros_topic: /cam_nav/camera_info, gz_topic: /cam_nav/camera_info, ros_type: sensor_msgs/msg/CameraInfo, gz_type: gz.msgs.CameraInfo, direction: gz_to_ros}
+  - {ros_topic: /cam_tag,        gz_topic: /cam_tag,        ros_type: sensor_msgs/msg/Image,      gz_type: gz.msgs.Image,      direction: gz_to_ros}
+  - {ros_topic: /cam_tag/camera_info, gz_topic: /cam_tag/camera_info, ros_type: sensor_msgs/msg/CameraInfo, gz_type: gz.msgs.CameraInfo, direction: gz_to_ros}
+  - {ros_topic: /cam_excavation, gz_topic: /cam_excavation, ros_type: sensor_msgs/msg/Image,      gz_type: gz.msgs.Image,      direction: gz_to_ros}
+  - {ros_topic: /cam_excavation/camera_info, gz_topic: /cam_excavation/camera_info, ros_type: sensor_msgs/msg/CameraInfo, gz_type: gz.msgs.CameraInfo, direction: gz_to_ros}
+  - {ros_topic: /cam_dump,       gz_topic: /cam_dump,       ros_type: sensor_msgs/msg/Image,      gz_type: gz.msgs.Image,      direction: gz_to_ros}
+  - {ros_topic: /cam_dump/camera_info, gz_topic: /cam_dump/camera_info, ros_type: sensor_msgs/msg/CameraInfo, gz_type: gz.msgs.CameraInfo, direction: gz_to_ros}
+
+  # --- inertial + wheel odometry + joint states ------------------------------
+  - {ros_topic: /imu,          gz_topic: /imu,          ros_type: sensor_msgs/msg/Imu,        gz_type: gz.msgs.IMU,      direction: gz_to_ros}
+  - {ros_topic: /odom,         gz_topic: /odom,         ros_type: nav_msgs/msg/Odometry,      gz_type: gz.msgs.Odometry, direction: gz_to_ros}
+  - {ros_topic: /tf,           gz_topic: /tf,           ros_type: tf2_msgs/msg/TFMessage,     gz_type: gz.msgs.Pose_V,   direction: gz_to_ros}
+  - {ros_topic: /joint_states, gz_topic: /joint_states, ros_type: sensor_msgs/msg/JointState, gz_type: gz.msgs.Model,    direction: gz_to_ros}
+
+  # --- commands (ROS -> gz) --------------------------------------------------
+  - {ros_topic: /cmd_vel, gz_topic: /cmd_vel, ros_type: geometry_msgs/msg/Twist, gz_type: gz.msgs.Twist, direction: ros_to_gz}
+
+  # --- excavation mechanism commands (ROS -> gz) -----------------------------
+  # Module 6 (rover_excavation) is the only publisher.  They drive the ladder
+  # position controller and the belt velocity controller declared in
+  # urdf/rover.urdf.xacro; on the real rover these stop at the digger's serial
+  # link (backend.kind: hardware in rover_excavation/config/excavation.yaml).
+  - {ros_topic: /excavation/ladder_cmd, gz_topic: /excavation/ladder_cmd, ros_type: std_msgs/msg/Float64, gz_type: gz.msgs.Double, direction: ros_to_gz}
+  - {ros_topic: /excavation/belt_cmd,   gz_topic: /excavation/belt_cmd,   ros_type: std_msgs/msg/Float64, gz_type: gz.msgs.Double, direction: ros_to_gz}

@@ -1,0 +1,222 @@
+%YAML 1.2
+---
+# =============================================================================
+# rover_excavation / excavation.yaml -- module 6's SINGLE SOURCE OF TRUTH.
+#
+# Module 6 owns the digging mechanism and the sand accounting.  It answers the
+# WorkCycle action that module 5 sends (action/WorkCycle.action in
+# rover_navigation_msgs) and it is the only place that knows:
+#
+#   * how the ladder, belt and tub are driven (kinematics + slew limits),
+#   * how much sand enters the tub while digging, and how fast,
+#   * where the sand lands when the tub is emptied, and
+#   * how much of the 1.25 x 0.9 m berm target has been built.
+#
+# THE SPLIT WITH MODULE 5 is deliberate and load-bearing:
+#   module 5 decides *where* the rover stands and *when* it works
+#   (it sends work_pose, sets /perception/mode, and drives the rover);
+#   module 6 decides *how* the mechanism works and *what came of it*
+#   (it never sends a wheel command and never reads ground truth).
+#
+# Sand is not simulated by Gazebo: the arena terrain is a static triangle mesh
+# (module 1).  So there is nothing to dig into, and module 6 therefore *models*
+# the sand: the tub fill level and the berm height field in this file's terms
+# are the authoritative record of what was moved.  BermStatus is the berm.
+#
+# FRAME CONVENTION: identical to the arena - origin at the west-south inner
+# corner of the floor, +x east, +y north, +z up, angles in radians unless the
+# key ends in "_deg".  base_link x is forward.
+# =============================================================================
+
+schema_version: 1
+
+# -----------------------------------------------------------------------------
+# Arena geometry that module 6 is allowed to know.
+#
+# Duplicated from cat_arena/config/arena.yaml on purpose: cat_arena is NOT
+# installed on the Raspberry Pi (there is no Gazebo there), and module 6 still
+# has to know where the berm target is to know whether a dump landed in it.  A
+# test cross-checks every number here against module 1 so they cannot drift.
+# -----------------------------------------------------------------------------
+arena:
+  length_x: 9.0            # m, east-west
+  width_y: 5.0             # m, north-south
+  sand_depth: 0.30         # m, tilled dry sand layer
+  zones:
+    construction:
+      rect: [0.0, 0.0, 2.0, 1.50]      # 2.0 x 1.5 m, south-west
+    berm_target:
+      rect: [0.375, 0.30, 1.625, 1.20] # 1.25 x 0.9 m inside the construction zone
+
+# -----------------------------------------------------------------------------
+# The rover's size, and the dump geometry module 5 uses.
+#
+# `robot` duplicates rover_description/config/rover.yaml + the operational
+# footprint agreed for module 5 (1.30 x 0.70 m, padded from the measured
+# 1.2396 x 0.655 envelope: build envelope is the 1.50 x 0.75 m rule ceiling).
+# `nav_dump` duplicates the dump block of rover_navigation/config/navigation.yaml
+# so module 6 can prove, in a unit test, that its pile lands inside the berm
+# target for the poses module 5 actually drives to.  Cross-checked, never read
+# at runtime.
+# -----------------------------------------------------------------------------
+robot:
+  build_length_m: 1.50     # rule ceiling (rover_description limits.envelope)
+  build_width_m: 0.75
+  length_m: 1.30           # operational footprint used by module 5
+  width_m: 0.70
+  circumscribed_radius_m: 0.7382   # 0.5 * hypot(1.30, 0.70)
+
+nav_dump:
+  heading_rad: 1.570796    # +y, dump side aft (module 5 mission.dump.heading_rad)
+  standoff_m: 0.05         # gap between the swept circle and the target edge
+  points: 5                # dump poses along the target's long axis
+  inset_m: 0.30
+
+# -----------------------------------------------------------------------------
+# The mechanism.  Every joint name, limit and rate the node needs to drive the
+# hardware, and the interlocks that decide when the rover may be driven.
+# -----------------------------------------------------------------------------
+mechanism:
+  rate_hz: 10.0            # control/status rate of the excavation node
+
+  ladder:                  # gz joint `ladder_pitch_joint` in rover_description
+    joint: ladder_pitch_joint
+    pivot_x_m: 0.35        # pitch pivot, in base_link
+    pivot_z_m: 0.15        # pitch pivot height in base_link (rover_description)
+    ride_height_m: 0.10    # base_link origin above the sand = the drive wheel
+                           # radius, so the pivot is 0.25 m above the sand.  Every
+                           # depth figure is measured from the sand surface; without
+                           # this the model bites 0.10 m early and overstates the
+                           # dig rate by ~4x.
+    length_m: 0.50         # pivot -> tip
+    width_m: 0.40
+    frame_thickness_m: 0.05
+    stowed_pitch_rad: -0.436332   # -25 deg: the raised travel attitude
+    dig_pitch_rad: 0.610865       # +35 deg: the working cut
+    min_pitch_rad: -0.523599      # -30 deg (fully retracted)
+    max_pitch_rad: 0.959931       # +55 deg (fully lowered)
+    max_rate_radps: 0.55          # deck slew speed
+
+  belt:                    # gz joint `belt_joint` (continuous, at the ladder tip)
+    joint: belt_joint
+    roller_radius_m: 0.05
+    dig_velocity_radps: 5.0       # + = forward: sand up the ladder into the tub
+    dump_velocity_radps: -6.0     # - = reverse: sand out of the tub onto the berm
+    max_velocity_radps: 6.0
+    max_accel_radps2: 12.0
+
+  tub:                     # fixed bin under the funnel (rover_description)
+    box_m: [0.42, 0.44, 0.22]     # outer size xyz, cross-checked
+    fill_fraction: 0.85           # usable fraction of the box before it spills
+    capacity_m3: 0.0346           # = fill_fraction * product(box_m) [0.0346]
+    gate_open_time_s: 0.80        # tub gate travel, shut -> fully open
+
+  interlocks:
+    # The ladder must be at or above this pitch before the rover may be driven.
+    travel_pitch_max_rad: -0.40
+    # Never drive the ladder tip deeper than this below the sand surface; the
+    # floor is at sand_depth, and hitting it would stall the chain.  This is a
+    # guard, not a working depth: the dig pitch only cuts 0.037 m, and the
+    # deepest the ladder can physically reach is 0.160 m at its +55 deg limit.
+    max_depth_m: 0.15
+
+# -----------------------------------------------------------------------------
+# The sand model.  Dig and dump rates tie back to the mechanism above so the
+# two cannot be tuned inconsistently, and the berm is a height field over the
+# berm target's footprint.
+# -----------------------------------------------------------------------------
+sand:
+  dig:
+    # rate = coefficient * engaged_width * engaged_depth * belt_surface_speed,
+    # clamped.  engaged_width is the ladder's clear cut width and
+    # belt_surface_speed is belt_velocity * roller_radius.
+    coefficient: 0.5
+    min_rate_m3_s: 0.0005
+    max_rate_m3_s: 0.012
+
+  dump:
+    # discharge_rate is the modelled tub emptying rate once the gate is open.
+    rate_m3_s: 0.008
+    # Where the pile forms.  Sand cannot land under the rover: it falls just
+    # behind the aft face and becomes a pile whose base spreads by the angle of
+    # repose.  So the centre of the pile is derived, not tuned:
+    #
+    #   landing_aft_m = robot.half_length_m + basal_radius(tub capacity) + margin
+    #
+    # with basal_radius the radius of a cone of the tub's volume at the repose
+    # angle (r = (3V / (pi tan(theta)))^(1/3); 0.366 m for a 0.0346 m3 tub at
+    # 34 deg, so the pile's near edge just reaches the rover's aft face).
+    # test_cross_checks.py proves the result lands inside the berm target for
+    # the dump poses module 5 actually drives to, so the two cannot drift.
+    repose_deg: 34.0      # dry sand angle of repose, sizes the pile
+    landing_margin_m: 0.0 # extra clearance, if a real machine throws further
+    spread_m: 0.20        # 1-sigma of the deposit, per axis (~ the pile radius)
+
+  berm:
+    target_height_m: 0.15   # judged berm height (cat_arena marking.berm_height)
+    cell_m: 0.05            # height-field cell size: 25 x 18 cells over the target
+
+# -----------------------------------------------------------------------------
+# Work-cycle timing.  A cycle is: move the mechanism -> work -> retract -> done,
+# matching the WorkCycle action's STAGE_*.
+# -----------------------------------------------------------------------------
+cycle:
+  settle_s: 0.40          # pause after the belt stops, before retracting
+  dig:
+    min_s: 2.0            # always run the belt at least this long
+    timeout_s: 60.0       # give up and fault past this
+    target_fill: 0.95     # stop when the tub is this full
+  dump:
+    min_s: 1.5
+    timeout_s: 30.0
+    target_empty: 0.02    # stop when the tub is this empty
+
+# -----------------------------------------------------------------------------
+# How the mechanism is actually commanded.  This is the ONLY place that knows
+# whether the actuators are behind Gazebo or a serial link - the same split
+# module 4 uses for its cameras.  `sim` publishes to the bridged gz joint
+# controller topics; `hardware` speaks the serial protocol of the real digger;
+# `null` drives nothing (dry runs and unit tests).
+# -----------------------------------------------------------------------------
+backend:
+  kind: sim               # sim | hardware | null
+  ladder_cmd_topic: /excavation/ladder_cmd   # std_msgs/Float64, radians
+  belt_cmd_topic: /excavation/belt_cmd       # std_msgs/Float64, rad/s
+  joint_states_topic: /joint_states          # sensor_msgs/JointState (report only)
+  serial:
+    port: /dev/ttyACM0
+    baud: 115200
+    timeout_s: 0.20
+
+# -----------------------------------------------------------------------------
+# Visualisation.  The berm has no simulator geometry of its own, so module 6
+# draws it: an rviz marker array always, and optionally a static box in the gz
+# world that rises out of the ground as the berm grows (checked with `gz
+# service`, so it needs no extra ROS package).  The box is visual-only: the
+# authoritative constraint is module 5's planner keep-out, and giving modelled
+# sand a collision shape would make the simulator assert something it does not
+# simulate.
+# -----------------------------------------------------------------------------
+visual:
+  publish_marker: true
+  marker_topic: /excavation/berm_marker
+  gz_berm: true
+  gz_world: cat_arena
+  gz_model: berm
+  gz_visual_only: true       # spawn without a collision element
+  gz_height_step_m: 0.01     # only poke the simulator when the berm moves this much
+
+# -----------------------------------------------------------------------------
+# Topics.  Identical in simulation and on the rover: nothing here knows whether
+# Gazebo is on the other end.
+# -----------------------------------------------------------------------------
+topics:
+  work_action: /excavation/work_cycle   # rover_navigation_msgs/action/WorkCycle
+  status: /excavation/status            # rover_excavation_msgs/MechanismStatus
+  berm: /excavation/berm                # rover_excavation_msgs/BermStatus
+  estop: /estop                         # std_msgs/Bool, true = STOP
+  perception_mode: /perception/mode     # std_msgs/String, set by module 5
+
+frames:
+  map: map
+  base: base_link

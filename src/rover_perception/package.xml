@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>rover_perception</name>
+  <version>0.1.0</version>
+  <description>
+    Module 4 of the Caterpillar Autonomy Challenge stack: the camera manager
+    (phase-based frame rates, thermal monitoring, 4000 kbps bandwidth meter),
+    AprilTag detection on cam_tag with known tag poses, map->odom correction by
+    tag_localizer (no AMCL), a boulder/crater detector on cam_nav with
+    flat-ground projection into arena coordinates, multi-frame tracking, an
+    arena-wall mask and confidence-weighted obstacles, plus fps/CPU/temperature
+    logging.  Camera-only: there is no depth sensor anywhere in this stack.
+  </description>
+  <maintainer email="team@cat-arena.local">Caterpillar Autonomy Challenge team</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+  <buildtool_depend>ament_cmake_pytest</buildtool_depend>
+
+  <depend>rover_perception_msgs</depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>rover_description</exec_depend>
+  <exec_depend>cat_arena</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-pil</exec_depend>
+
+  <exec_depend>robot_localization</exec_depend>
+
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

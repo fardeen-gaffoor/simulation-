@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>rover_description</name>
+  <version>0.2.0</version>
+  <description>
+    Module 2 of the Caterpillar Autonomy Challenge stack: the rover model.
+    Xacro macros build a 4-wheel skid-steer excavation rover (gz diff-drive)
+    with computed inertias, a ladder pitch joint, a belt roller joint, a tub
+    and a funnel, an IMU without a magnetometer, wheel odometry and four plain
+    RGB cameras (cam_nav, cam_tag, cam_excavation, cam_dump).  Provides the one
+    camera calibration YAML (intrinsics + extrinsics), the ros_gz_bridge table
+    for image + camera_info, a mass budget table, an envelope-assertion script
+    and the /estop + /battery/energy_wh interface stubs.
+  </description>
+  <maintainer email="team@cat-arena.local">Caterpillar Autonomy Challenge team</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+  <buildtool_depend>ament_cmake_pytest</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>tf2_msgs</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>urdf</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

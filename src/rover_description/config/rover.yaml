@@ -1,0 +1,204 @@
+# =============================================================================
+# rover_description / rover.yaml -- SINGLE SOURCE OF TRUTH for the rover.
+#
+# EVERY dimension, mass, joint limit and camera parameter of the robot lives in
+# this file.  Nothing else in the stack may hard-code robot geometry: the xacro
+# model, the calibration file, the mass budget, the envelope check and the tests
+# all read it.
+#
+# FRAME CONVENTION (matches cat_arena / the competition arena frame)
+#   base_link origin = centre of the chassis footprint, at the wheel-axle height
+#   with the robot RESTING ON FLAT GROUND (wheel contact plane is z = 0).
+#     +x -> forward   (DECLARED "forward" for the competition; assumption A2)
+#     +y -> left      (right-handed)
+#     +z -> up
+#   Camera optical frames follow REP-103/REP-105: +z forward, +x right, +y down.
+#
+# COMPETITION CONSTRAINTS (do not deviate)
+#   * stowed envelope <= 1.5 m (x) x 0.75 m (y) x 0.75 m (z)
+#   * total mass <= 80 kg INCLUDING beacons, markers and battery
+#   * cameras: plain RGB only, 4 of them, no depth
+#   * IMU WITHOUT magnetometer/compass; wheel odometry; no GPS, no ultrasonic,
+#     no touch sensors, no hydraulics.
+#
+# All numeric robot-design choices are ASSUMPTIONS (see README "assumptions"):
+# the competition fixes only the envelope, the mass ceiling and the sensor ban,
+# not the internal layout.  They are parameterised here so they can be changed
+# in one place.
+# =============================================================================
+
+schema_version: 1
+
+meta:
+  name: "Caterpillar Autonomy Challenge - berm construction rover"
+  description: "4-wheel skid-steer rover with a ladder/belt digger, bucket tub and funnel"
+  declared_forward: "+x"
+
+# Competition limits.  check_envelope.py asserts the generated robot against these.
+limits:
+  envelope:
+    length_x: 1.5
+    width_y: 0.75
+    height_z: 0.75
+  mass_kg: 80.0
+
+# -----------------------------------------------------------------------------
+# Chassis
+# -----------------------------------------------------------------------------
+chassis:
+  length: 0.74          # x
+  width: 0.50           # y
+  height: 0.22          # z
+  center: [0.0, 0.0, 0.21]   # xyz in base_link (axle height + half height)
+  mass: 18.0
+  color: [0.90, 0.72, 0.05, 1.0]   # CAT yellow
+
+# -----------------------------------------------------------------------------
+# Drive: 4 wheels, skid steer, differential drive (gz diff-drive plugin)
+# -----------------------------------------------------------------------------
+drive:
+  wheel_radius: 0.10
+  wheel_width: 0.055
+  track: 0.60           # left<->right wheel CENTRE separation (y)
+  wheelbase: 0.52       # front<->rear wheel CENTRE separation (x)
+  wheel_mass: 3.0       # wheel + in-hub motor + gearbox, per corner
+  joint_damping: 0.05
+  joint_friction: 0.02
+  max_wheel_torque: 25.0
+  max_wheel_velocity: 12.0
+  wheel_color: [0.12, 0.12, 0.13, 1.0]
+  hub_color: [0.65, 0.65, 0.68, 1.0]
+  wheel_mu: 1.0
+  wheel_mu2: 1.0
+
+# -----------------------------------------------------------------------------
+# Excavation: ladder (chain+buckets) on a pitch joint, belt (conveyor roller),
+# tub (collection bin) and funnel (guides sand from belt into the tub).
+# -----------------------------------------------------------------------------
+excavation:
+  ladder:
+    length: 0.50        # along the ladder, from the pivot
+    width: 0.40
+    frame_thickness: 0.05
+    plate_thickness: 0.02
+    mass: 9.0
+    pivot: [0.35, 0.0, 0.15]     # xyz of the pitch joint in base_link
+    # Convention: POSITIVE pitch rotates the ladder tip DOWN (into the sand).
+    # Stowed = raised above horizontal (negative), the attitude used by the
+    # envelope check.  Deployed digging is positive.
+    stowed_pitch_deg: -25.0      # raised travel attitude (used by the envelope)
+    min_pitch_deg: -30.0         # fully retracted / raised
+    max_pitch_deg: 55.0          # fully lowered into the sand
+    color: [0.25, 0.27, 0.30, 1.0]
+  belt:
+    roller_radius: 0.05
+    length: 0.38
+    mass: 1.5
+    # belt roller sits at the ladder tip; the joint is continuous (the belt drive)
+    offset_from_ladder_tip: 0.06
+    color: [0.10, 0.10, 0.10, 1.0]
+    max_velocity: 6.0            # rad/s
+  tub:
+    size: [0.42, 0.44, 0.22]     # xyz
+    center: [-0.15, 0.0, 0.33]
+    mass: 3.0
+    color: [0.35, 0.35, 0.38, 1.0]
+  funnel:
+    size: [0.34, 0.36, 0.10]
+    center: [-0.15, 0.0, 0.49]
+    mass: 1.5
+    color: [0.30, 0.30, 0.33, 1.0]
+
+# -----------------------------------------------------------------------------
+# Sensors
+# -----------------------------------------------------------------------------
+sensors:
+  imu:
+    enabled: true
+    link: imu_link
+    origin: [0.0, 0.0, 0.15]     # xyz in base_link (on top of the chassis)
+    update_rate: 100.0
+    # An IMU has NO magnetometer by competition rule; the gz sensor publishes
+    # orientation/angular_velocity/linear_acceleration only.
+  # Plain RGB cameras.  cam_nav/cam_tag point forward, cam_excavation looks at
+  # the dig area, cam_dump looks at the tub.  Mount rpy is [roll, pitch, yaw] in
+  # base_link, degrees; POSITIVE PITCH TILTS THE VIEW DOWN.
+  cameras:
+    - name: cam_nav
+      topic: /cam_nav
+      frame: cam_nav_link
+      origin: [0.36, 0.0, 0.58]
+      rpy_deg: [0.0, 18.0, 0.0]
+      width: 640
+      height: 480
+      hfov_deg: 100.0
+      update_rate: 15.0
+      role: "front navigation, high, ~100 deg wide, tilted down 18 deg"
+    - name: cam_tag
+      topic: /cam_tag
+      frame: cam_tag_link
+      origin: [0.37, 0.0, 0.50]
+      rpy_deg: [0.0, 0.0, 0.0]
+      width: 1280
+      height: 720
+      hfov_deg: 65.0
+      update_rate: 15.0
+      role: "front fiducial/AprilTag, level, <=60 cm high, high resolution"
+    - name: cam_excavation
+      topic: /cam_excavation
+      frame: cam_excavation_link
+      origin: [0.30, 0.0, 0.42]
+      rpy_deg: [0.0, 50.0, 0.0]
+      width: 640
+      height: 480
+      hfov_deg: 90.0
+      update_rate: 10.0
+      role: "looks down at the dig area / ladder"
+    - name: cam_dump
+      topic: /cam_dump
+      frame: cam_dump_link
+      origin: [-0.30, 0.0, 0.46]
+      rpy_deg: [0.0, 40.0, 180.0]
+      width: 640
+      height: 480
+      hfov_deg: 90.0
+      update_rate: 10.0
+      role: "looks down at the tub / dump area, facing rearward"
+
+# -----------------------------------------------------------------------------
+# Non-structural mass (battery, electronics, beacons/markers, wiring, brackets)
+# kept OUT of the geometry so the mass budget is explicit and auditable.
+# -----------------------------------------------------------------------------
+payload:
+  - {name: "battery", mass: 8.0}
+  - {name: "electronics (Pi 5, carrier, power)", mass: 2.0}
+  - {name: "4x RGB cameras + lenses", mass: 0.2}
+  - {name: "IMU", mass: 0.05}
+  - {name: "camera mast + brackets", mass: 1.2}
+  - {name: "beacons + markers", mass: 0.8}
+  - {name: "wiring harness", mass: 1.5}
+  - {name: "fasteners + misc", mass: 1.0}
+
+# -----------------------------------------------------------------------------
+# Interface topics (identical in sim and on the real robot).  These are the
+# stubs declared for module 2 and consumed/owned by later modules.
+# -----------------------------------------------------------------------------
+topics:
+  estop: /estop                        # std_msgs/Bool, true = STOP (subscribe)
+  battery_energy: /battery/energy_wh   # std_msgs/Float64, Wh remaining (publish)
+  cmd_vel: /cmd_vel                    # geometry_msgs/Twist
+  odom: /odom                          # nav_msgs/Odometry (wheel odometry)
+  joint_states: /joint_states          # sensor_msgs/JointState
+  tf: /tf                              # tf2_msgs/TFMessage
+  imu: /imu                            # sensor_msgs/Imu
+  # Excavation mechanism commands: module 6 (rover_excavation) publishes these,
+  # the gz joint controllers below consume them.  In simulation they are carried
+  # by ros_gz_bridge (config/bridges.yaml, ros_to_gz); on the real rover they
+  # stop at the digger's serial link instead.
+  ladder_cmd: /excavation/ladder_cmd   # std_msgs/Float64, ladder pitch target in rad
+  belt_cmd: /excavation/belt_cmd       # std_msgs/Float64, belt velocity target in rad/s
+
+battery:
+  capacity_wh: 480.0          # nominal pack energy for the stub publisher
+  initial_energy_wh: 480.0
+  idle_draw_w: 6.0            # draw used by the stub when not commanded

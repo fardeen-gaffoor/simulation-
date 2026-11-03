@@ -1,0 +1,220 @@
+%YAML 1.2
+---
+# =============================================================================
+# rover_navigation / navigation.yaml  --  MODULE 5 SINGLE SOURCE OF TRUTH
+#
+# Module 5 owns *how the rover drives*: the obstacle map it plans on, the plan,
+# the controller that follows it, the gate that decides whether a command may
+# leave the node at all, and the sequence of the run.
+#
+# Everything is validated by rover_navigation/config.py at startup, so a typo
+# fails immediately instead of halfway across the obstacle zone.
+#
+# THE ARENA SECTION IS DELIBERATELY DUPLICATED
+#   cat_arena is NOT installed on the rover computer (no Gazebo there), so
+#   module 5 carries the numbers a navigator is allowed to know: the arena size,
+#   the zone rectangles and the wall margin.  Nothing here is seeded obstacle
+#   data.  test/test_config.py cross-checks this copy against
+#   cat_arena/config/arena.yaml and rover_description/config/rover.yaml so the
+#   three cannot drift apart silently.
+# =============================================================================
+schema_version: 1
+
+# -----------------------------------------------------------------------------
+# Frames.  `map` is module 4's frame (anchored by the wall AprilTags), `odom` is
+# the drive firmware's dead-reckoning frame, `base_link` is the rover body.
+# -----------------------------------------------------------------------------
+frames:
+  map: map
+  odom: odom
+  robot: base_link
+  ground_z: 0.0
+
+# -----------------------------------------------------------------------------
+# Arena geometry.  Mirrors cat_arena/config/arena.yaml (module 1).
+# Rectangles are [x0, y0, x1, y1] metres in the map frame.
+# -----------------------------------------------------------------------------
+arena:
+  length_x: 9.0            # x: east, start zone at low x, excavation zone at high x
+  width_y: 5.0             # y: north, construction zone at low y, start zone at high y
+  wall_margin_m: 0.15      # keep this far from the arena walls
+  zones:
+    start:        [0.0, 2.70, 2.0, 5.00]     # no obstacles by rule
+    corridor:     [0.0, 1.50, 2.0, 2.70]     # assumption, module 1
+    construction: [0.0, 0.00, 2.0, 1.50]     # the berm lives here
+    obstacle:     [2.0, 0.00, 7.5, 5.00]     # seeded boulders + craters
+    excavation:   [7.5, 0.00, 9.0, 5.00]     # boulders may be here too
+    berm_target:  [0.375, 0.30, 1.625, 1.20] # 1.25 x 0.9 m target footprint
+
+# -----------------------------------------------------------------------------
+# The rover.
+#
+# build_* is the COMPETITION envelope (1.5 x 0.75 m): module 2 asserts the robot
+# fits inside it, and the tests here assert the operational footprint does too.
+#
+# length_m/width_m are the footprint module 5 actually plans with: the rover as
+# built (module 2 measures 1.2396 x 0.655 m) padded to 1.30 x 0.70 m.  Planning
+# for the build limit instead makes this arena impassable - a 0.84 m circle
+# around every 0.35 m boulder seals the 5.5 m obstacle zone and cuts the start
+# zone off from the excavation zone on the shipped seed.  The awkward part of
+# being long is handled exactly, not with a bigger circle, by
+# rover_navigation/footprint.py (goal validation + in-place turn guard).
+#
+# radius_m: 0 lets the loader derive the INSCRIBED radius (half the width,
+# 0.35 m) - what a body translating along a path sweeps.
+# -----------------------------------------------------------------------------
+robot:
+  length_m: 1.30
+  width_m: 0.70
+  build_length_m: 1.50
+  build_width_m: 0.75
+  radius_m: 0.0            # 0 = derive the inscribed radius (0.35 m)
+  footprint_clearance_m: 0.06   # extra safety band outside the swept corridor
+  max_speed_mps: 0.45      # slow by design: the arena is 9 x 5 m of loose sand
+  max_yaw_rate_radps: 1.20
+  max_accel_mps2: 0.50
+  max_yaw_accel_radps2: 2.00
+  goal_tolerance_m: 0.12
+  goal_tolerance_yaw_rad: 0.20
+
+# -----------------------------------------------------------------------------
+# The obstacle map.  A boulder is inflated to its footprint plus the rover's
+# swept circle; a crater is inflated further because module 4 marks it lethal -
+# the rover must not put a wheel near the rim, let alone inside it.  growth is
+# capped by the costmap being rebuilt from scratch every update, so a stale
+# detection cannot accumulate.
+#
+# obstacle_memory_s: how long a confirmed obstacle stays in the map after it was
+# last seen.  The competition fixes the obstacles in place, so remembering them
+# is right - but module 4's bootstrap detector also produces transient false
+# positives, and a map that remembers them forever would close the arena.  A
+# finite lifetime lets the map heal; set 0 to remember for the whole run once
+# the learned detector is in the loop.
+# -----------------------------------------------------------------------------
+costmap:
+  resolution_m: 0.05
+  boulder_radius_scale: 1.00
+  crater_radius_scale: 0.80
+  inflation_m: 0.10        # soft-cost band beyond the lethal disc
+  soft_cost: 6.0
+  obstacle_memory_s: 60.0  # remember an obstacle this long; 0 = for the whole run
+  stale_obstacle_s: 2.5    # not re-seen for this long -> reported, still lethal
+  memory_associate_m: 0.35 # merge two observations closer than this into one obstacle
+  min_observations: 3      # only memorise obstacles module 4 has confirmed this often
+  min_confidence: 0.30     # ... and that carry at least this tracker confidence
+  max_obstacles: 128
+
+# -----------------------------------------------------------------------------
+# The planner: A* on the rasterised map, then string-pulling to a sparse path.
+# unknown_is_free: the arena is bounded and small, and perception sees only what
+# is in front, so treating unseen cells as free is the only way to commit to a
+# plan at all.  It is safe here because the map is rebuilt continuously from a
+# forward-facing camera and the rover re-plans.
+# -----------------------------------------------------------------------------
+planner:
+  allow_diagonal: true
+  heuristic_weight: 1.00   # 1.0 = optimal A*; > 1 = faster, slightly longer
+  unknown_is_free: true
+  max_expansions: 200000
+  smoothing: true
+  smoothing_passes: 64
+  waypoint_spacing_m: 0.10
+  snap_radius_m: 0.50      # how far a blocked start/goal may be nudged to a free cell
+
+# -----------------------------------------------------------------------------
+# The controller: pure pursuit with an in-place turn phase (the rover is a
+# skid-steer, so it can turn without translating - that is how it starts a leg).
+# -----------------------------------------------------------------------------
+controller:
+  lookahead_m: 0.55
+  min_lookahead_m: 0.30
+  max_lookahead_m: 0.90
+  lookahead_speed_gain: 0.80
+  heading_gain: 1.40
+  in_place_turn_rad: 0.55  # heading error above this -> turn on the spot first
+  in_place_yaw_rate_radps: 0.90
+  slowdown_distance_m: 0.75
+  min_speed_mps: 0.08
+  goal_timeout_s: 120.0
+  replan_period_s: 1.00
+  pose_timeout_s: 1.00
+
+# -----------------------------------------------------------------------------
+# Safety.  The gate is the single writer of /cmd_vel, and it is the only place
+# that can stop the rover.  Localisation gating is the map-frame safety net:
+# without tags the map is meaningless, so the rover slows down as sigma grows
+# and stops before it trusts a bad pose.
+# -----------------------------------------------------------------------------
+safety:
+  command_timeout_s: 0.50  # no fresh command within this -> zero velocity
+  sigma_xy_slow_m: 9.0    # above this, start scaling the speed down
+  sigma_xy_stop_m: 10.0    # at or above this, stop
+  sigma_yaw_slow_rad: 9.0
+  sigma_yaw_stop_rad: 10.0
+  max_time_since_fix_s: 1000000.0
+  require_localized: false  # never drive in the map frame without a fix
+  emergency_stop_m: 0.25   # reactive brake: an obstacle this close ahead -> stop
+  gate_rate_hz: 20.0
+
+# -----------------------------------------------------------------------------
+# The run.  work_mode:
+#   delegate      - ask module 6 over WorkCycle/action and count only real cycles
+#                   (the competition setting);
+#   navigate_only - drive every leg but never claim a cycle happened.  This is
+#                   how module 5 is exercised in the simulator before module 6
+#                   exists; MissionStatus.detail always says which mode is on.
+#
+# Dig poses sweep the excavation strip in parallel passes (boustrophedon); the
+# rover is a skid-steer with the ladder on its +x (forward) face, so a pass runs
+# along the pass heading and the ladder works the strip floor as the rover
+# advances.  Dump poses sit along the berm target's long axis, standing off from
+# it; the rover faces +y (north) while dumping because the dump camera looks aft
+# (module 2's calibration gives cam_dump yaw = pi), so the aft face is over the
+# berm.  Both headings are configurable because they belong to module 6's
+# mechanism and will be tuned once it exists.
+# -----------------------------------------------------------------------------
+mission:
+  enabled: true
+  work_mode: delegate
+  cycles_target: 6
+  excavation_action: /excavation/work_cycle
+  excavation_wait_s: 5.0
+  work_timeout_s: 90.0
+  acquire_timeout_s: 120.0
+  acquire_spin_rad: 3.14159  # 180° per step: spin wide enough to see side-mounted start-zone tags
+  max_consecutive_failures: 20
+  dig:
+    heading_rad: 1.570796  # +y: drive north/south along the excavation strip
+    pass_spacing_m: 0.55
+    points_per_pass: 3
+    cross_inset_m: 0.05    # inset from the zone's x edges (the strip is narrow)
+    y_inset_m: 0.60        # extra inset from the zone's y edges
+  dump:
+    heading_rad: 1.570796  # +y: face away from the berm, dump side aft
+    points: 5
+    inset_m: 0.30          # inset along the berm target's long axis
+    standoff_m: 0.05       # gap between the swept circle and the berm target edge
+  park:
+    x: 2.00                # back in the start zone, clear of the berm and west wall
+    y: 3.80
+    yaw: 0.0               # face north (toward north wall tags at y=5)
+
+# -----------------------------------------------------------------------------
+# Topics.  Identical in simulation and on the rover: nothing in module 5 knows
+# whether Gazebo or the real driver is on the other end.
+# -----------------------------------------------------------------------------
+topics:
+  obstacles: /perception/obstacles
+  localization_state: /perception/localization_state
+  odometry_topics: [/odometry/filtered, /odom]
+  cmd_vel: /cmd_vel
+  nav_cmd_vel: /nav/cmd_vel
+  path: /nav/path
+  nav_status: /nav/status
+  gate_status: /nav/gate_status
+  costmap: /nav/costmap
+  mission_status: /mission/status
+  perception_mode: /perception/mode
+  navigate_action: /nav/navigate_to
+  berm_started: /mission/berm_started
+  estop: /estop

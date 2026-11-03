@@ -1,0 +1,96 @@
+<?xml version="1.0" ?>
+<!--
+  cat_arena spawn proxy - TEST FIXTURE, NOT THE ROVER.
+
+  A rigid 1.5 x 0.75 x 0.75 m box with the challenge's stated stowed envelope
+  and an 80 kg mass.  It exists so that module 1 can prove the whole spawn path
+  end to end *today*:
+
+      ros2 launch cat_arena arena.launch.py seed:=7
+
+  spawns this body at the randomly sampled start pose, which is exactly how
+  module 2's real rover is spawned later (same argument, same code path):
+
+      ros2 launch cat_arena arena.launch.py seed:=7 robot:=<rover model sdf>
+
+  The red nose marks the declared "forward" (+x) direction so the sampled
+  heading is visible in the GUI.
+
+  Assumed uniform density: 80 kg / (1.5*0.75*0.75 m^3) = 94.8 kg/m^3
+    m   = 80 kg
+    Ixx = m/12 (wy^2 + wz^2) = 80/12 (0.5625 + 0.5625) =  7.5000 kg m^2
+    Iyy = m/12 (wx^2 + wz^2) = 80/12 (2.25   + 0.5625) = 18.7500 kg m^2
+    Izz = m/12 (wx^2 + wy^2) = 80/12 (2.25   + 0.5625) = 18.7500 kg m^2
+  The centre of mass is placed 0.20 m above the link origin (a low-slung rover,
+  not a floating brick) so the proxy does not topple while it settles.
+-->
+<sdf version="1.9">
+  <model name="spawn_proxy">
+    <link name="base_link">
+      <pose>0 0 0.375 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0.20 0 0 0</pose>
+        <mass>80.0</mass>
+        <inertia>
+          <ixx>7.5</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>18.75</iyy>
+          <iyz>0</iyz>
+          <izz>18.75</izz>
+        </inertia>
+      </inertial>
+      <collision name="body_collision">
+        <geometry>
+          <box>
+            <size>1.5 0.75 0.75</size>
+          </box>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>0.6</mu>
+              <mu2>0.6</mu2>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+      <visual name="body_visual">
+        <geometry>
+          <box>
+            <size>1.5 0.75 0.75</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.25 0.28 0.32 1</ambient>
+          <diffuse>0.35 0.38 0.42 1</diffuse>
+          <specular>0.2 0.2 0.2 1</specular>
+        </material>
+      </visual>
+      <visual name="forward_nose">
+        <pose>0.7 0 0.15 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.1 0.35 0.2</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.8 0.1 0.1 1</ambient>
+          <diffuse>0.9 0.15 0.15 1</diffuse>
+        </material>
+      </visual>
+      <visual name="top_hatch">
+        <pose>-0.4 0 0.42 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.5 0.5 0.06</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.15 0.5 0.2 1</ambient>
+          <diffuse>0.2 0.7 0.3 1</diffuse>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

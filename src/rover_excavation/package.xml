@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>rover_excavation</name>
+  <version>0.1.0</version>
+  <description>
+    Module 6 of the Caterpillar Autonomy Challenge stack: the excavation
+    mechanism (ladder, belt, tub) and the berm.  Serves the WorkCycle action
+    that module 5's behaviour sequencer calls, models the sand it moves, and
+    reports MechanismStatus and BermStatus.  It never drives the rover.
+  </description>
+  <maintainer email="team@cat-arena.local">Caterpillar Autonomy Challenge team</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <depend>rover_navigation_msgs</depend>
+  <depend>rover_excavation_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>visualization_msgs</depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <!-- The real digger is spoken to over a serial link (backend.kind: hardware),
+       which needs python3-serial.  The simulator does not, so it is deliberately
+       NOT a package dependency: install it on the rover computer only, and the
+       node will say so plainly if it is missing. -->
+
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

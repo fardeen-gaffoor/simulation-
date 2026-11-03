@@ -1,0 +1,22 @@
+# ROS 2 / colcon
+build/
+install/
+log/
+.colcon_metadata/
+
+# generated worlds (arena.sdf + terrain meshes + label artifacts)
+worlds/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

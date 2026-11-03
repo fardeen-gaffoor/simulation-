@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>rover_navigation</name>
+  <version>0.1.0</version>
+  <description>
+    Module 5 of the Caterpillar Autonomy Challenge stack: the obstacle map built
+    from live camera perception, A* planning on an inflated costmap, a pure
+    pursuit controller with an in-place turn phase for the skid-steer, an exact
+    rotated-rectangle footprint test for goals and in-place turns, a velocity
+    gate that is the single writer of /cmd_vel (e-stop, command staleness,
+    localisation gating, reactive brake), and the arena-level behaviour
+    sequencer that drives /perception/mode (acquire, dig, haul, dump, park).
+    The excavation mechanism itself is module 6, behind the WorkCycle action.
+  </description>
+  <maintainer email="team@cat-arena.local">Caterpillar Autonomy Challenge team</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+  <buildtool_depend>ament_cmake_pytest</buildtool_depend>
+
+  <depend>rover_navigation_msgs</depend>
+  <depend>rover_perception_msgs</depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>rover_perception</exec_depend>
+  <exec_depend>rover_description</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

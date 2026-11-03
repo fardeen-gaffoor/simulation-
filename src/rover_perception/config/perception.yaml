@@ -1,0 +1,290 @@
+%YAML 1.2
+---
+# =============================================================================
+# rover_perception / perception.yaml -- MODULE 4 SINGLE SOURCE OF TRUTH
+#
+# Camera-only perception for the Caterpillar Autonomy Challenge.  There is no
+# depth sensor anywhere in this stack: boulders and craters are found in the
+# cam_nav image, their ground-contact pixel is unprojected onto the flat sand
+# plane using module 2's calibration, and the result is tracked in the arena
+# (map) frame.  AprilTags on the walls anchor the map -> odom transform.
+#
+# Everything here is range-checked by rover_perception/config.py at startup.
+# Values marked VERIFIED were measured on this machine (see docs/).
+# =============================================================================
+
+schema_version: 1
+
+# -----------------------------------------------------------------------------
+# The arena, as perception is allowed to know it.
+#
+# Competition truth: 9 x 5 m, ~30 cm tilled dry sand, walls all round.  The map
+# frame has its origin at the west-south arena corner, +x east, +y north, z up,
+# exactly like module 1's ground_truth.yaml and module 3's labels -- but note
+# that this file deliberately does NOT read ground_truth.yaml: that file also
+# carries the seeded obstacle list, which the autonomy must never be given.
+# Obstacle positions only ever come from live camera perception.
+#
+# test/test_config.py cross-checks these numbers against
+# cat_arena/config/arena.yaml so the two copies cannot drift silently.
+# -----------------------------------------------------------------------------
+arena:
+  frame_id: map
+  robot_frame: base_link
+  odom_frame: odom
+  ground_z: 0.0
+  length_x: 9.0
+  width_y: 5.0
+  origin_xy: [0.0, 0.0]
+  wall_height: 0.5              # module 1's wall height (flagged assumption)
+  wall_margin_m: 0.15           # keep detections this far from the walls
+  zones:
+    start:        [0.0, 2.7, 2.0, 5.0]      # no obstacles by rule
+    corridor:     [0.0, 1.5, 2.0, 2.7]      # assumption, module 1
+    construction: [0.0, 0.0, 2.0, 1.5]      # berm target lives here
+    obstacle:     [2.0, 0.0, 7.5, 5.0]      # seeded boulders + craters
+    excavation:   [7.5, 0.0, 9.0, 5.0]      # boulders allowed here too
+
+# -----------------------------------------------------------------------------
+# Module 1/2 artefacts (generated, never imported as Python).
+#
+# Empty string = use the default location of the generating module:
+#   calibration -> rover_description.generate.default_output_dir()
+#   markers     -> the arena output directory of the running world
+# `ros2 run rover_perception perception_info.py` prints what resolved.
+# -----------------------------------------------------------------------------
+artifacts:
+  calibration: ""
+  markers: ""
+  tags_file: tags.yaml
+  output_dir: ""
+
+# -----------------------------------------------------------------------------
+# Managed cameras.  Names/topics/encodings mirror module 2's rover.yaml and
+# rover_description/config/bridges.yaml; `role` is what the phase manager acts
+# on.  Roles must be unique and must cover every mode in config.MODES.
+# -----------------------------------------------------------------------------
+cameras:
+  - {name: cam_nav,        role: nav,        topic: /cam_nav,        camera_info_topic: /cam_nav/camera_info,        width: 640,  height: 480, encoding: rgb8, bytes_per_pixel: 3}
+  - {name: cam_tag,        role: tag,        topic: /cam_tag,        camera_info_topic: /cam_tag/camera_info,        width: 1280, height: 720, encoding: rgb8, bytes_per_pixel: 3}
+  - {name: cam_excavation, role: excavation, topic: /cam_excavation, camera_info_topic: /cam_excavation/camera_info, width: 640,  height: 480, encoding: rgb8, bytes_per_pixel: 3}
+  - {name: cam_dump,       role: dump,       topic: /cam_dump,       camera_info_topic: /cam_dump/camera_info,       width: 640,  height: 480, encoding: rgb8, bytes_per_pixel: 3}
+
+# -----------------------------------------------------------------------------
+# (a) Camera manager: phase-based frame rates, thermal zones, bandwidth meter.
+#
+# The manager publishes rover_perception_msgs/CameraPhase.  That message is the
+# contract with rover_camera_driver (the real-hardware package, not built yet):
+# the active camera streams at active_rate_hz, every other camera at
+# idle_rate_hz, and a camera with rate_hz == 0.0 is switched off.  Nothing
+# outside the manager and the driver interprets it, so the CSI hub model stays
+# private to the driver.
+#
+# IN SIMULATION the Gazebo sensors cannot be re-rated at runtime, so the phase
+# is advisory: the detector honours it, and the bandwidth meter reports what the
+# cameras really cost.  See docs/camera_manager.md.
+# -----------------------------------------------------------------------------
+camera_manager:
+  enabled: true
+  mode_topic: /perception/mode           # std_msgs/String in, module 5 drives this
+  initial_mode: nav
+  phase_topic: /perception/camera_phase
+  status_topic: /perception/camera_status
+  active_rate_hz: 15.0                   # matches module 2's camera update_rate
+  idle_rate_hz: 3.0                      # enough to notice motion, cheap on the link
+  min_rate_hz: 1.0                       # a streaming camera never goes below this
+  stale_after_s: 2.0                     # no frame for this long => "not streaming"
+  publish_hz: 5.0
+
+  # The competition rule: average <= 4000 kbps total, measured over the link.
+  # derate_factors is the escalation ladder the manager walks when over budget
+  # (and walks back down, with hysteresis, when comfortably under).
+  bandwidth:
+    # In simulation Gazebo sensors cannot be re-rated; the meter honestly
+    # reports the raw camera bytes (~60-80 Mbps total) so set the limit high
+    # enough that the derate ladder never triggers.  On the real robot this
+    # must be 4000 kbps (competition uplink budget).
+    # In simulation Gazebo cameras publish at fixed rates (~100+ Mbps each)
+    # and cannot be re-rated.  Set limits high so the derate ladder never
+    # triggers in sim.  On the real robot this MUST be 4000 kbps.
+    limit_kbps: 2000000.0
+    window_s: 10.0
+    hysteresis_kbps: 250.0
+    hard_limit_kbps: 2500000.0
+    derate_factors: [1.0, 0.7, 0.5, 0.35, 0.2, 0.0]
+
+  # Raspberry Pi 5 thermal zones (/sys/class/thermal/thermal_zone*/temp).
+  # zone_paths: [] = auto-detect every zone; the hottest one is used.
+  thermal:
+    enabled: true
+    zone_paths: []
+    # Laptop CPU runs ~100 C; Pi 5 throttles at 80 C.  Raise for sim.
+    warn_c: 85.0
+    throttle_c: 105.0
+    critical_c: 110.0
+    throttle_steps: 2
+    poll_hz: 1.0
+
+# -----------------------------------------------------------------------------
+# (d) Boulder/crater detector.
+#
+# backend: classical  -> runs today, numpy only, no model file (see docs/detector.md)
+#          onnx       -> the YOLOv8n fine-tuned in module 3, exported to ONNX
+#                        (Pi CPU) with an optional Hailo path later.
+#
+# The projection, tracking, wall mask and obstacle publishing are identical for
+# both backends, so module 5 can be developed against `classical` and switched
+# to the trained model by changing one line here.
+# -----------------------------------------------------------------------------
+detector:
+  enabled: true
+  camera: cam_nav
+  backend: classical
+  publish_hz: 10.0               # obstacle-map update rate (<= camera rate)
+  max_frame_age_s: 0.5
+  obstacles_topic: /perception/obstacles
+  stats_topic: /perception/detector_stats
+  cloud:
+    enabled: true                # sensor_msgs/PointCloud2 for nav2's obstacle layer
+    topic: /perception/obstacles_cloud
+
+  # Flat-ground projection policy.  contact_point is the bbox bottom-centre: a
+  # boulder touches the sand at the bottom of its silhouette and a crater's near
+  # rim is the bottom of its projected rim ellipse, so one rule serves both --
+  # and it is the same convention module 3 used to draw the training boxes.
+  ground:
+    min_range_m: 0.35            # closer than this the flat-ground ray model breaks
+    max_range_m: 6.5
+    contact_point: bbox_bottom_center
+    boulder_radius_scale: 1.00
+    crater_radius_scale: 1.15    # a crater's widest point is nearer than its near rim
+    min_radius_m: 0.08
+    max_radius_m: 0.45
+    default_sigma_xy_m: 0.12
+
+  # The classical backend: segment what is not sand, then split blobs into
+  # boulders (convex, lit from above: top brighter than bottom) and craters
+  # (concave: top darker than bottom).  Ambiguous blobs are treated as craters
+  # because a needless detour is much cheaper than driving into a hole.
+  classical:
+    horizon_margin_px: 4         # ignore rows at/above the horizon (no ground there)
+    left_fraction: 0.0
+    right_fraction: 1.0
+    bottom_fraction: 1.0
+    reference_rows: 24           # rows sampled for the sand colour reference
+    delta_luma: 18.0             # absolute luminance offset from sand
+    delta_chroma: 14.0           # absolute colour offset from sand
+    mad_k: 2.5                   # ...or this many robust deviations from sand
+    min_area_px: 60
+    max_area_px: 60000
+    min_fill: 0.45               # blob area / bbox area
+    max_aspect: 3.0
+    max_bbox_fraction: 0.6       # a blob covering most of the image is not an obstacle
+    shadow_delta: 8.0            # grey levels that separate "lit from above" from "shaded"
+    ambiguous_kind: crater
+    max_detections: 16
+
+  # YOLOv8n exported to ONNX for the Pi's CPU (onnxruntime), later NCNN/Hailo.
+  # classes MUST stay in module 3's dataset order: 0 = boulder, 1 = crater.
+  onnx:
+    model: ""                    # e.g. "~/cat/models/boulder_crater.onnx"
+    providers: [CPUExecutionProvider]
+    input_size: 640
+    confidence: 0.25
+    iou: 0.45
+    classes: [boulder, crater]
+    max_detections: 32
+    letterbox_pad: 114
+
+# -----------------------------------------------------------------------------
+# (d) Tracking: one track per physical obstacle, in the map frame.
+#
+# Detections are associated to tracks by distance; a track is published once it
+# has `min_hits` observations and is kept for `max_misses` missed frames while
+# its confidence decays with `decay_half_life_s`.  Craters get a conservative
+# confidence bonus (crater_bias) so an uncertain crater still shows up.
+# -----------------------------------------------------------------------------
+tracking:
+  min_hits: 2
+  max_misses: 3
+  min_confidence: 0.25
+  associate_radius_m: 0.30
+  position_gain: 0.5
+  hit_gain: 0.45
+  decay_half_life_s: 1.5
+  crater_bias: 0.15
+  max_obstacles: 64
+  sigma_xy_m: 0.12
+
+# -----------------------------------------------------------------------------
+# (b) AprilTags on cam_tag.  Marker boards are module 1's (3 placements: two in
+# the start zone, one mid-arena north wall); module 4 draws the 36h11 bitmaps
+# into them (simulation only) and publishes detections.
+#
+# tags.yaml is generated from markers.yaml by `generate_tags.py` and is the
+# runtime catalogue: tag id -> pose in the map frame + physical size.
+# -----------------------------------------------------------------------------
+tags:
+  enabled: true
+  camera: cam_tag
+  family: tag36h11
+  topic: /perception/tag_detections
+  detection:
+    quad_decimate: 1.0
+    quad_sigma: 0.0
+    nthreads: 2
+    refine_edges: true
+    decision_margin_min: 15.0
+    hamming_max: 1
+    max_detections: 8
+    debug_image: false
+    publish_debug_topic: /perception/tag_debug
+  board:
+    enabled: true                # render textured tag boards into a running sim
+    quiet_zone_modules: 1
+    # Module 1 draws the dark tag square as a box of 1.4 x board_thickness
+    # centred on the board, so it protrudes 0.7 x 0.01 = 7 mm in front of the
+    # board centre (arena.yaml board_thickness).  test/test_config.py
+    # cross-checks this number against arena.yaml.
+    protrusion_m: 0.007
+    lift_m: 0.003                # clearance in front of that protruding square
+    texture_size_px: 512
+    spawn_timeout_s: 60.0
+
+# -----------------------------------------------------------------------------
+# (c) Localization: no AMCL.  robot_localization fuses wheel odom + IMU into
+# /odometry/filtered, and tag_localizer turns an AprilTag sighting into a
+# map -> odom correction whose covariance grows with dead reckoning and
+# collapses on every fix.
+# -----------------------------------------------------------------------------
+localization:
+  enabled: true
+  odometry_topics: [/odometry/filtered, /odom]   # first one that publishes wins
+  state_topic: /perception/localization_state
+  fix_topic: /localization/tag_fix
+  publish_hz: 20.0
+  sigma:
+    fix_xy_m: 0.04
+    fix_yaw_rad: 0.06
+    growth_m_per_m: 0.05         # 5 cm of 1-sigma per metre driven without a fix
+    growth_rad_per_rad: 0.03
+    max_xy_m: 3.0
+    max_yaw_rad: 1.2
+  min_tag_range_m: 0.25
+  max_tag_range_m: 6.0
+  max_correction_m: 1.5          # a bigger jump than this is rejected as a mistake
+  max_correction_yaw_rad: 0.6
+  xy_gain: 1.0                   # 1.0 = apply the fix fully, < 1 = smooth it
+  yaw_gain: 1.0
+  accept_margin_scale: 1.0
+
+# -----------------------------------------------------------------------------
+# (e) Health: fps, CPU and temperature logging, mirrored to /diagnostics.
+# -----------------------------------------------------------------------------
+health:
+  enabled: true
+  topic: /perception/health
+  diagnostics_topic: /diagnostics
+  publish_hz: 1.0
+  cpu_warn_pct: 90.0
+  thermal_warn_c: 80.0

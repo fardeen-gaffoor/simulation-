@@ -1,0 +1,32 @@
+# Drive to a pose in the map frame.
+#
+# This is the only way anything outside module 5 asks the rover to move.  The
+# navigator answers it by planning around the live obstacle map, obeying the
+# arena walls, and letting the velocity gate scale or veto the result - so a
+# client never commands wheel speeds, only a destination.
+#
+# Distances and headings are in the map frame, which module 4 anchors with the
+# wall AprilTags.  A goal is refused (result `success = false`) if it lies
+# outside the arena, inside the wall margin, or on top of a known obstacle.
+
+# --- goal ------------------------------------------------------------------
+geometry_msgs/PoseStamped goal            # target pose in the map frame
+float32 position_tolerance_m              # 0 = use navigation.robot.goal_tolerance_m
+float32 yaw_tolerance_rad                 # 0 = use navigation.robot.goal_tolerance_yaw_rad
+float32 max_speed_mps                     # 0 = use navigation.robot.max_speed_mps
+float32 timeout_s                         # 0 = use navigation.controller.goal_timeout_s
+---
+# --- result ----------------------------------------------------------------
+bool success
+string message                            # "" on success, a reason otherwise
+float32 final_distance_m
+float32 final_yaw_error_rad
+float32 elapsed_s
+float32 path_length_m
+uint32 replans
+---
+# --- feedback --------------------------------------------------------------
+geometry_msgs/PoseStamped current_pose
+float32 distance_remaining_m
+float32 speed_mps
+uint8 state                               # NavigationStatus.STATE_* values

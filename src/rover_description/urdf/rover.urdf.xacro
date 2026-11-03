@@ -1,0 +1,247 @@
+<?xml version="1.0"?>
+<!-- ==========================================================================
+     rover_description / rover.urdf.xacro
+
+     4-wheel skid-steer excavation rover.  Every dimension, mass and joint
+     limit comes from config/rover.yaml; every inertia from the generated
+     config/inertias.yaml.  Nothing here is hard-coded.
+
+     Generate a plain URDF with:
+         ros2 run rover_description generate_robot
+     which expands this file with absolute config/inertias paths (see
+     rover_description.generate).
+     ========================================================================== -->
+<robot name="rover" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:arg name="config"   default="$(find rover_description)/config/rover.yaml"/>
+  <xacro:arg name="inertias" default="$(find rover_description)/config/inertias.yaml"/>
+
+  <xacro:property name="cfg"  value="${xacro.load_yaml('$(arg config)')}"/>
+  <xacro:property name="iner" value="${xacro.load_yaml('$(arg inertias)')}"/>
+  <xacro:property name="deg2rad" value="0.017453292519943295"/>
+
+  <xacro:include filename="macros.xacro"/>
+
+  <!-- chassis ============================================================ -->
+  <xacro:property name="ch_len" value="${cfg['chassis']['length']}"/>
+  <xacro:property name="ch_wid" value="${cfg['chassis']['width']}"/>
+  <xacro:property name="ch_hgt" value="${cfg['chassis']['height']}"/>
+  <xacro:property name="ch_rgba"
+    value="${cfg['chassis']['color'][0]} ${cfg['chassis']['color'][1]} ${cfg['chassis']['color'][2]} ${cfg['chassis']['color'][3]}"/>
+
+  <!-- drive ============================================================== -->
+  <xacro:property name="wheel_r"  value="${cfg['drive']['wheel_radius']}"/>
+  <xacro:property name="wheel_w"  value="${cfg['drive']['wheel_width']}"/>
+  <xacro:property name="track"    value="${cfg['drive']['track']}"/>
+  <xacro:property name="wheelbase" value="${cfg['drive']['wheelbase']}"/>
+  <xacro:property name="j_damp"   value="${cfg['drive']['joint_damping']}"/>
+  <xacro:property name="j_fric"   value="${cfg['drive']['joint_friction']}"/>
+  <xacro:property name="max_torque" value="${cfg['drive']['max_wheel_torque']}"/>
+  <xacro:property name="max_wvel"  value="${cfg['drive']['max_wheel_velocity']}"/>
+  <xacro:property name="wheel_mu"  value="${cfg['drive']['wheel_mu']}"/>
+  <xacro:property name="wheel_mu2" value="${cfg['drive']['wheel_mu2']}"/>
+  <xacro:property name="wheel_rgba"
+    value="${cfg['drive']['wheel_color'][0]} ${cfg['drive']['wheel_color'][1]} ${cfg['drive']['wheel_color'][2]} ${cfg['drive']['wheel_color'][3]}"/>
+
+  <!-- excavation ========================================================= -->
+  <xacro:property name="lad_len" value="${cfg['excavation']['ladder']['length']}"/>
+  <xacro:property name="lad_wid" value="${cfg['excavation']['ladder']['width']}"/>
+  <xacro:property name="lad_thk" value="${cfg['excavation']['ladder']['frame_thickness']}"/>
+  <xacro:property name="lad_px" value="${cfg['excavation']['ladder']['pivot'][0]}"/>
+  <xacro:property name="lad_py" value="${cfg['excavation']['ladder']['pivot'][1]}"/>
+  <xacro:property name="lad_pz" value="${cfg['excavation']['ladder']['pivot'][2]}"/>
+  <xacro:property name="lad_min" value="${cfg['excavation']['ladder']['min_pitch_deg'] * deg2rad}"/>
+  <xacro:property name="lad_max" value="${cfg['excavation']['ladder']['max_pitch_deg'] * deg2rad}"/>
+  <xacro:property name="lad_stowed" value="${cfg['excavation']['ladder']['stowed_pitch_deg'] * deg2rad}"/>
+  <xacro:property name="lad_rgba"
+    value="${cfg['excavation']['ladder']['color'][0]} ${cfg['excavation']['ladder']['color'][1]} ${cfg['excavation']['ladder']['color'][2]} ${cfg['excavation']['ladder']['color'][3]}"/>
+  <xacro:property name="belt_r" value="${cfg['excavation']['belt']['roller_radius']}"/>
+  <xacro:property name="belt_len" value="${cfg['excavation']['belt']['length']}"/>
+  <xacro:property name="belt_rgba"
+    value="${cfg['excavation']['belt']['color'][0]} ${cfg['excavation']['belt']['color'][1]} ${cfg['excavation']['belt']['color'][2]} ${cfg['excavation']['belt']['color'][3]}"/>
+
+  <!-- topics ============================================================= -->
+  <xacro:property name="t_cmd_vel" value="${cfg['topics']['cmd_vel']}"/>
+  <xacro:property name="t_odom"    value="${cfg['topics']['odom']}"/>
+  <xacro:property name="t_joints"  value="${cfg['topics']['joint_states']}"/>
+  <xacro:property name="t_tf"      value="${cfg['topics']['tf']}"/>
+  <xacro:property name="t_imu"     value="${cfg['topics']['imu']}"/>
+  <xacro:property name="t_ladder_cmd" value="${cfg['topics']['ladder_cmd']}"/>
+  <xacro:property name="t_belt_cmd"   value="${cfg['topics']['belt_cmd']}"/>
+
+  <!-- ==================================================================== -->
+  <!-- base_link: the chassis box; origin is the chassis centre on the ground -->
+  <!-- ==================================================================== -->
+  <xacro:box_link name="base_link"
+    size="${ch_len} ${ch_wid} ${ch_hgt}" rgba="${ch_rgba}" ikey="base_link"
+    geom_origin="${cfg['chassis']['center'][0]} ${cfg['chassis']['center'][1]} ${cfg['chassis']['center'][2]}"/>
+
+  <!-- ==================================================================== -->
+  <!-- wheels + continuous joints (skid steer)                              -->
+  <!-- ==================================================================== -->
+  <xacro:macro name="wheel" params="name x y">
+    <xacro:cylinder_link name="${name}" radius="${wheel_r}" length="${wheel_w}"
+      rgba="${wheel_rgba}" ikey="${name}"/>
+    <xacro:continuous_joint name="${name}_joint" parent="base_link" child="${name}"
+      xyz="${x} ${y} ${wheel_r}" rpy="-1.5707963267948966 0 0" axis="0 0 1"
+      damping="${j_damp}" friction="${j_fric}"/>
+    <gazebo reference="${name}">
+      <xacro:gz_surface_friction mu="${wheel_mu}" mu2="${wheel_mu2}"/>
+    </gazebo>
+  </xacro:macro>
+
+  <xacro:wheel name="wheel_front_left"  x="${wheelbase/2}"  y="${track/2}"/>
+  <xacro:wheel name="wheel_front_right" x="${wheelbase/2}"  y="-${track/2}"/>
+  <xacro:wheel name="wheel_rear_left"   x="-${wheelbase/2}" y="${track/2}"/>
+  <xacro:wheel name="wheel_rear_right"  x="-${wheelbase/2}" y="-${track/2}"/>
+
+  <!-- ==================================================================== -->
+  <!-- excavation: ladder (pitch), belt (continuous), tub, funnel           -->
+  <!-- ==================================================================== -->
+  <xacro:box_link name="ladder_link"
+    size="${lad_len} ${lad_wid} ${lad_thk}" rgba="${lad_rgba}" ikey="ladder_link"
+    geom_origin="${lad_len/2} 0 0"/>
+  <xacro:revolute_joint name="ladder_pitch_joint" parent="base_link" child="ladder_link"
+    xyz="${lad_px} ${lad_py} ${lad_pz}" rpy="0 0 0" axis="0 1 0"
+    lower="${lad_min}" upper="${lad_max}" effort="200.0" velocity="1.5"
+    damping="5.0" friction="0.5"/>
+
+  <xacro:cylinder_link name="belt_link" radius="${belt_r}" length="${belt_len}"
+    rgba="${belt_rgba}" ikey="belt_link"/>
+  <xacro:continuous_joint name="belt_joint" parent="ladder_link" child="belt_link"
+    xyz="${lad_len} 0 0" rpy="-1.5707963267948966 0 0" axis="0 0 1"
+    damping="0.01" friction="0.01"/>
+
+  <xacro:box_link name="tub_link"
+    size="${cfg['excavation']['tub']['size'][0]} ${cfg['excavation']['tub']['size'][1]} ${cfg['excavation']['tub']['size'][2]}"
+    rgba="${cfg['excavation']['tub']['color'][0]} ${cfg['excavation']['tub']['color'][1]} ${cfg['excavation']['tub']['color'][2]} ${cfg['excavation']['tub']['color'][3]}"
+    ikey="tub_link"/>
+  <xacro:fixed_joint name="tub_joint" parent="base_link" child="tub_link"
+    xyz="${cfg['excavation']['tub']['center'][0]} ${cfg['excavation']['tub']['center'][1]} ${cfg['excavation']['tub']['center'][2]}"/>
+
+  <xacro:box_link name="funnel_link"
+    size="${cfg['excavation']['funnel']['size'][0]} ${cfg['excavation']['funnel']['size'][1]} ${cfg['excavation']['funnel']['size'][2]}"
+    rgba="${cfg['excavation']['funnel']['color'][0]} ${cfg['excavation']['funnel']['color'][1]} ${cfg['excavation']['funnel']['color'][2]} ${cfg['excavation']['funnel']['color'][3]}"
+    ikey="funnel_link"/>
+  <xacro:fixed_joint name="funnel_joint" parent="base_link" child="funnel_link"
+    xyz="${cfg['excavation']['funnel']['center'][0]} ${cfg['excavation']['funnel']['center'][1]} ${cfg['excavation']['funnel']['center'][2]}"/>
+
+  <!-- ==================================================================== -->
+  <!-- cameras: link + fixed joint + optical frame + gz sensor              -->
+  <!-- ==================================================================== -->
+  <xacro:macro name="camera_assembly" params="cam">
+    <xacro:property name="cname" value="${cam['name']}"/>
+    <link name="${cam['frame']}"/>
+    <joint name="${cam['frame']}_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="${cam['frame']}"/>
+      <origin xyz="${cam['origin'][0]} ${cam['origin'][1]} ${cam['origin'][2]}"
+              rpy="${cam['rpy_deg'][0]*deg2rad} ${cam['rpy_deg'][1]*deg2rad} ${cam['rpy_deg'][2]*deg2rad}"/>
+    </joint>
+    <link name="${cname}_optical_frame"/>
+    <joint name="${cname}_optical_joint" type="fixed">
+      <parent link="${cam['frame']}"/>
+      <child link="${cname}_optical_frame"/>
+      <origin xyz="0 0 0" rpy="-1.5707963267948966 0 -1.5707963267948966"/>
+    </joint>
+    <gazebo reference="${cam['frame']}">
+      <xacro:gz_camera name="${cname}"
+        topic="${cam['topic']}" info_topic="${cam['topic']}/camera_info"
+        optical_frame="${cname}_optical_frame"
+        width="${cam['width']}" height="${cam['height']}"
+        hfov_rad="${cam['hfov_deg']*deg2rad}" rate="${cam['update_rate']}"/>
+    </gazebo>
+  </xacro:macro>
+
+  <xacro:if value="${cfg['sensors']['cameras'][0]['name'] == 'cam_nav'}">
+    <xacro:camera_assembly cam="${cfg['sensors']['cameras'][0]}"/>
+  </xacro:if>
+  <xacro:camera_assembly cam="${cfg['sensors']['cameras'][1]}"/>
+  <xacro:camera_assembly cam="${cfg['sensors']['cameras'][2]}"/>
+  <xacro:camera_assembly cam="${cfg['sensors']['cameras'][3]}"/>
+
+  <!-- ==================================================================== -->
+  <!-- IMU (no magnetometer)                                                -->
+  <!-- ==================================================================== -->
+  <xacro:if value="${cfg['sensors']['imu']['enabled']}">
+    <link name="${cfg['sensors']['imu']['link']}"/>
+    <joint name="${cfg['sensors']['imu']['link']}_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="${cfg['sensors']['imu']['link']}"/>
+      <origin xyz="${cfg['sensors']['imu']['origin'][0]} ${cfg['sensors']['imu']['origin'][1]} ${cfg['sensors']['imu']['origin'][2]}"
+              rpy="0 0 0"/>
+    </joint>
+    <gazebo reference="${cfg['sensors']['imu']['link']}">
+      <xacro:gz_imu name="imu" topic="${t_imu}" rate="${cfg['sensors']['imu']['update_rate']}"/>
+    </gazebo>
+  </xacro:if>
+
+  <!-- ==================================================================== -->
+  <!-- gz model plugins: skid-steer diff drive + joint states               -->
+  <!-- ==================================================================== -->
+  <gazebo>
+    <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
+      <left_joint>wheel_front_left_joint</left_joint>
+      <left_joint>wheel_rear_left_joint</left_joint>
+      <right_joint>wheel_front_right_joint</right_joint>
+      <right_joint>wheel_rear_right_joint</right_joint>
+      <wheel_separation>${track}</wheel_separation>
+      <wheel_radius>${wheel_r}</wheel_radius>
+      <max_wheel_torque>${max_torque}</max_wheel_torque>
+      <max_wheel_acceleration>3.0</max_wheel_acceleration>
+      <topic>${t_cmd_vel}</topic>
+      <odom_topic>${t_odom}</odom_topic>
+      <tf_topic>${t_tf}</tf_topic>
+      <publish_odom>true</publish_odom>
+      <publish_odom_tf>true</publish_odom_tf>
+      <publish_wheel_tf>false</publish_wheel_tf>
+      <odom_frame>odom</odom_frame>
+      <child_frame>base_link</child_frame>
+    </plugin>
+    <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
+      <topic>${t_joints}</topic>
+    </plugin>
+    <!-- The digging mechanism's two actuators.  Module 6 (rover_excavation) is
+         the only publisher on these command topics; with nothing publishing,
+         the ladder simply holds its initial position and the belt stays still.
+
+         * the ladder is position controlled (it has to hold an angle against
+           gravity), so it uses the position controller;
+         * the belt is velocity controlled - it is a roller that spins at a
+           commanded speed and never has a "position" - so it uses the plain
+           joint controller in velocity mode (`use_force_commands` false).
+
+         The gains below are simulator controller tuning, not machine
+         parameters; the machine's own limits live in rover_excavation/
+         config/excavation.yaml and are enforced before anything is commanded.
+
+         `<topic>`, not `<sub_topic>`: gz scopes `sub_topic` as
+         `/model/<model_name>/<sub_topic>`, so a bridged ROS topic could never
+         reach it.  `<topic>` is the global form, the same one DiffDrive uses for
+         /cmd_vel, which is what makes the ros_gz_bridge entries in
+         config/bridges.yaml line up with what the plugin actually listens on.
+         Verified live: the ladder follows /excavation/ladder_cmd. -->
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>ladder_pitch_joint</joint_name>
+      <topic>${t_ladder_cmd}</topic>
+      <initial_position>${lad_stowed}</initial_position>
+      <p_gain>800.0</p_gain>
+      <i_gain>0.0</i_gain>
+      <d_gain>60.0</d_gain>
+      <cmd_max>300.0</cmd_max>
+      <cmd_min>-300.0</cmd_min>
+    </plugin>
+    <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
+      <joint_name>belt_joint</joint_name>
+      <topic>${t_belt_cmd}</topic>
+      <use_force_commands>false</use_force_commands>
+      <initial_velocity>0.0</initial_velocity>
+      <p_gain>5.0</p_gain>
+      <i_gain>0.0</i_gain>
+      <d_gain>0.0</d_gain>
+      <cmd_max>20.0</cmd_max>
+      <cmd_min>-20.0</cmd_min>
+    </plugin>
+  </gazebo>
+
+</robot>

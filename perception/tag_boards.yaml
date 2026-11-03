@@ -1,0 +1,67 @@
+# rover_perception tag board spawn plan - generated
+schema_version: 1
+output_dir: /home/fewest/cat/perception
+world: cat_arena
+count: 3
+boards:
+- id: 0
+  name: tag_board_0
+  size_m: 0.225
+  texture: /home/fewest/cat/perception/tag_0_tag36h11.png
+  sdf: /home/fewest/cat/perception/tag_board_0.sdf
+  position:
+  - 1.0
+  - 4.973
+  - 0.4
+  rpy:
+  - -1.570796327
+  - 0.0
+  - 0.0
+  normal:
+  - -0.0
+  - -1.0
+  - -0.0
+- id: 1
+  name: tag_board_1
+  size_m: 0.225
+  texture: /home/fewest/cat/perception/tag_1_tag36h11.png
+  sdf: /home/fewest/cat/perception/tag_board_1.sdf
+  position:
+  - 0.027
+  - 3.85
+  - 0.4
+  rpy:
+  - -1.570796327
+  - -0.0
+  - 1.570796327
+  normal:
+  - 1.0
+  - -0.0
+  - -0.0
+- id: 2
+  name: tag_board_2
+  size_m: 0.225
+  texture: /home/fewest/cat/perception/tag_2_tag36h11.png
+  sdf: /home/fewest/cat/perception/tag_board_2.sdf
+  position:
+  - 6.0
+  - 4.973
+  - 0.4
+  rpy:
+  - -1.570796327
+  - 0.0
+  - 0.0
+  normal:
+  - -0.0
+  - -1.0
+  - -0.0
+spawn_commands:
+- ros2 run ros_gz_sim create -world cat_arena -file /home/fewest/cat/perception/tag_board_0.sdf
+  -name tag_board_0 -x 1.000000 -y 4.973000 -z 0.400000 -R -1.570796327 -P 0.000000000
+  -Y 0.000000000
+- ros2 run ros_gz_sim create -world cat_arena -file /home/fewest/cat/perception/tag_board_1.sdf
+  -name tag_board_1 -x 0.027000 -y 3.850000 -z 0.400000 -R -1.570796327 -P -0.000000000
+  -Y 1.570796327
+- ros2 run ros_gz_sim create -world cat_arena -file /home/fewest/cat/perception/tag_board_2.sdf
+  -name tag_board_2 -x 6.000000 -y 4.973000 -z 0.400000 -R -1.570796327 -P 0.000000000
+  -Y 0.000000000

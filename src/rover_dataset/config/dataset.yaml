@@ -1,0 +1,210 @@
+# =============================================================================
+# rover_dataset - the ONE source of truth for the perception dataset (module 3).
+#
+# Everything here is validated by rover_dataset/config.py.  Nothing in the
+# dataset toolchain hard-codes a number that lives in this file.
+#
+# This file describes a *dataset factory*, not a dataset: the generated dataset
+# (images/, labels/, scenes.json, data.yaml) is an artefact, exactly like
+# arena.sdf is for cat_arena.
+# =============================================================================
+schema_version: 1
+
+meta:
+  name: "Caterpillar Autonomy Challenge - boulder/crater perception dataset"
+  # The competition forbids giving the autonomy stack obstacle positions.  This
+  # dataset is a TRAINING artefact; the data.yaml it produces must never be
+  # read by rover_perception/rover_navigation at run time.
+  rule_note: "ground-truth-derived labels are training data only"
+
+# -----------------------------------------------------------------------------
+# Detection classes, in YOLO index order.  The order is a wire contract: a
+# trained model's class index 0 IS boulder.  Module 4's detector must use the
+# same order (it reads the classes file this module writes).
+# -----------------------------------------------------------------------------
+classes:
+  - name: boulder
+    description: "raised rock, 30-40 cm diameter, positive obstacle"
+    color: [0.55, 0.42, 0.30]
+  - name: crater
+    description: "sand depression, 40-50 cm wide, negative obstacle"
+    color: [0.28, 0.28, 0.32]
+
+# -----------------------------------------------------------------------------
+# Where things live.
+# -----------------------------------------------------------------------------
+paths:
+  # Empty string -> the installed cat_arena / rover_description config.
+  arena_config: ""
+  rover_config: ""
+  dataset_root: dataset                 # relative to --out-dir (or absolute)
+  scenes_dir: _scenes                   # per-scene generated worlds + manifests
+  image_format: jpg                     # jpg | png
+  image_quality: 95                     # JPEG quality for the final file (not the augmentation)
+  classes_file: classes.txt
+  data_yaml: data.yaml
+  write_sidecar: true                   # <stem>.json next to each label (debug/stats only)
+
+# -----------------------------------------------------------------------------
+# Data collection from the simulator.
+#
+# The rover is TELEPORTED to sampled poses rather than driven: it gives exact
+# coverage, is reproducible, and cannot get stuck on an obstacle.  Each pose is
+# rendered once per camera per frame; frames_per_pose > 1 re-renders the SAME
+# pose and is used for augmentation diversity only.
+# -----------------------------------------------------------------------------
+capture:
+  poses_per_scene: 60
+  frames_per_pose: 2
+  cameras: [cam_nav, cam_tag]
+  settle_seconds: 0.7                   # after a teleport, before reading the pose
+  pose_gz_attempts: 3                   # retries per teleport
+  world_name: cat_arena                 # the gz world name (cat_arena's arena.yaml)
+  model_name: rover                     # the spawned model entity name
+  teleport_z: 0.12                      # m, drop height; the rover settles onto the sand
+
+  pose_plan:
+    seed_namespace: pose_plan
+    margin: 0.45                        # m, keep-out from the arena walls
+    # Sample a pose uniformly in one of these regions (weighted), then pick a
+    # heading.  Regions are the competition zones; obstacle-heavy zones get a
+    # higher weight because that is where the detector must work.
+    regions:
+      - name: obstacle
+        rect: [2.00, 0.00, 7.50, 5.00]
+        weight: 3.0
+      - name: excavation
+        rect: [7.50, 0.00, 9.00, 5.00]
+        weight: 1.0
+      - name: construction
+        rect: [0.00, 0.00, 2.00, 1.50]
+        weight: 0.7
+      - name: start
+        rect: [0.00, 2.70, 2.00, 5.00]
+        weight: 0.7
+    heading: toward_obstacles            # toward_obstacles | toward_region_centre | random
+    heading_jitter_deg: 30.0
+    # A pose is rejected and resampled if it violates any of these.
+    min_obstacle_clearance: 0.75         # m, centre-to-centre distance to a boulder
+    min_crater_clearance: 0.55           # m, centre-to-centre distance to a crater centre
+    max_tries: 400
+
+# -----------------------------------------------------------------------------
+# Projecting the module-1 ground truth through the module-2 calibration.
+# -----------------------------------------------------------------------------
+labeling:
+  ground_z: 0.0                         # m, mean sand level (cat_arena's ground-truth frame)
+  boulder_silhouette_samples: 512       # samples on the (partly buried) sphere
+  crater_rim_samples: 256
+  min_box_width_px: 6.0
+  min_box_height_px: 6.0
+  min_visible_fraction: 0.30            # fraction of the raw box inside the image
+  keep_truncated: true                  # keep boxes that touch the image border
+  truncation_margin_px: 1.0
+  occluded_policy: drop                 # drop | keep
+  occlusion_fraction: 0.98              # a boulder blocks if the ray misses by < 0.98*r
+  # Objects smaller than this are real but unlabelled (they are also the ones a
+  # detector cannot learn from); they are recorded in the sidecar as dropped.
+  min_box_area_px: 40.0
+
+# -----------------------------------------------------------------------------
+# Per-frame image domain randomization.  Each op is applied independently with
+# probability `prob`; parameter ranges are sampled from a seeded RNG.  The
+# final label is unaffected by photometric ops, so they are safe by construction;
+# the two geometric ops (flip_180, horizontal_flip) rewrite the boxes.
+# -----------------------------------------------------------------------------
+augment:
+  enabled: true
+  seed_namespace: augment
+  gaussian_blur:    {prob: 0.55, sigma: {min: 0.0, max: 1.7}}
+  motion_blur:      {prob: 0.25, kernel: {min: 3, max: 9}}
+  gaussian_noise:   {prob: 0.60, sigma: {min: 0.0, max: 7.0}}
+  salt_pepper:      {prob: 0.20, amount: {min: 0.0, max: 0.008}}
+  brightness:       {prob: 0.90, delta: {min: -0.22, max: 0.22}}
+  contrast:         {prob: 0.90, factor: {min: 0.72, max: 1.30}}
+  gamma:            {prob: 0.70, value: {min: 0.72, max: 1.40}}
+  saturation:       {prob: 0.55, factor: {min: 0.60, max: 1.40}}
+  hue_shift_deg:    {prob: 0.35, delta: {min: -12.0, max: 12.0}}
+  jpeg:             {prob: 0.50, quality: {min: 40, max: 92}}
+  vignette:         {prob: 0.30, strength: {min: 0.0, max: 0.35}}
+  # The CSI hub may present images rotated 180 deg.  Left at 0 until the real
+  # mounting is known; enable it to train a rotation-agnostic model.
+  flip_180:         {prob: 0.0}
+  horizontal_flip:  {prob: 0.0}
+
+# -----------------------------------------------------------------------------
+# Per-scene environment randomization.  A scene is one generated world + one
+# generated rover; its config is a pure function of (scene_seed, scene_index),
+# so a scene can be regenerated byte-for-byte later.
+# -----------------------------------------------------------------------------
+scene:
+  count: 8
+  start_seed: 1000
+  seed_namespace: scene
+  # arena.yaml overrides
+  sand_color:
+    hue_shift:  {min: -0.05, max: 0.05}       # shifted in HSV hue space
+    value_scale: {min: 0.80, max: 1.12}       # brightness multiplier
+  terrain:
+    noise_amplitude: {min: 0.0, max: 0.012}   # gentle sand ripples
+  sun:
+    elevation_deg: {min: 18.0, max: 80.0}
+    azimuth_deg:   {min: -180.0, max: 180.0}
+    warm_cool:     {min: -0.20, max: 0.20}    # >0 warms the diffuse light
+    intensity_scale: {min: 0.65, max: 1.35}   # scales the diffuse colour
+    cast_shadows_prob: 0.85
+  scene:
+    ambient:    {min: 0.28, max: 0.70}
+    background: {min: 0.58, max: 0.95}
+  # rover.yaml overrides: a small per-scene camera mount variation.  The
+  # calibration used for labelling is the one GENERATED for that scene, so the
+  # jitter is always consistent with the images.
+  camera_mount_jitter:
+    translation_m: {min: 0.0, max: 0.008}
+    rotation_deg:  {min: 0.0, max: 1.5}
+
+# -----------------------------------------------------------------------------
+# Train/val split.  ALWAYS by scene, never by frame: consecutive frames of one
+# scene share lighting, sand colour, mount jitter and often the exact same
+# obstacles, so a frame-level split would leak the validation set.
+# -----------------------------------------------------------------------------
+split:
+  val_fraction: 0.25
+  seed: 0
+  seed_namespace: split
+  # A scene is placed in val whole.  Real-photo batches are their own scenes and
+  # participate in the split like any other scene.
+  stratify_by_source: true
+
+# -----------------------------------------------------------------------------
+# Real photos must carry most of the weight in the final model.  Ultralytics
+# has no per-sample weights, so extra copies (symlinks) of the real images are
+# materialised in the training split until the real images are at least
+# `target_real_fraction` of the effective training set.
+# -----------------------------------------------------------------------------
+sampling:
+  target_real_fraction: 0.60
+  max_repeat: 8
+  sim_repeat: 1
+
+# -----------------------------------------------------------------------------
+# Fine-tuning recipe (YOLOv8n).  `finetune.py` turns this into a command; the
+# script refuses to guess if ultralytics is missing.
+# -----------------------------------------------------------------------------
+finetune:
+  base_model: yolov8n.pt
+  imgsz: 640
+  epochs: 120
+  batch: 16
+  patience: 30
+  workers: 4
+  device: ""                            # empty -> ultralytics default
+  project: runs
+  name: boulder_crater
+  seed: 0
+  # Freeze the first N layers while the real photos dominate the fine-tune.
+  freeze: 0
+  notes:
+    - "Start from COCO YOLOv8n: sand, rocks and shadows are already partly learned."
+    - "Real photographs have the largest effect; add them before adding epochs."
+    - "Export to ONNX/NCNN and measure INT8 latency on the Pi in module 4."

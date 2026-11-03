@@ -1,0 +1,114 @@
+# rover_perception tag catalogue - generated, do not edit
+# Source of truth: cat_arena's markers.yaml + tags.board.* in perception.yaml
+schema_version: 1
+frame: map
+family: tag36h11
+source:
+  markers: /home/fewest/cat/worlds/seed_1/markers.yaml
+  markers_sha256: 5964830d5d0d68d486024054561b60d759e12ff7e8b2347c8462875cbc3a3d15
+  markers_seed: 1
+  standoff_m: 0.01
+  protrusion_m: 0.007
+  lift_m: 0.003
+  quiet_zone_modules: 1
+count: 3
+tags:
+- id: 0
+  family: tag36h11
+  size_m: 0.18
+  drawing_size_m: 0.225
+  position:
+  - 1.0
+  - 4.973
+  - 0.4
+  rpy:
+  - -1.570796327
+  - 0.0
+  - 0.0
+  quaternion_xyzw:
+  - -0.707106781
+  - 0.0
+  - 0.0
+  - 0.707106781
+  normal:
+  - -0.0
+  - -1.0
+  - -0.0
+  frame_z:
+  - 0.0
+  - 1.0
+  - 0.0
+  board_position:
+  - 1.0
+  - 4.983
+  - 0.4
+  standoff_m: 0.01
+  mount: north_wall
+  note: north wall, inside the start zone
+  texture: tag_0_tag36h11.png
+- id: 1
+  family: tag36h11
+  size_m: 0.18
+  drawing_size_m: 0.225
+  position:
+  - 0.027
+  - 3.85
+  - 0.4
+  rpy:
+  - -1.570796327
+  - -0.0
+  - 1.570796327
+  quaternion_xyzw:
+  - -0.5
+  - -0.5
+  - 0.5
+  - 0.5
+  normal:
+  - 1.0
+  - -0.0
+  - -0.0
+  frame_z:
+  - -1.0
+  - 0.0
+  - 0.0
+  board_position:
+  - 0.017
+  - 3.85
+  - 0.4
+  standoff_m: 0.01
+  mount: west_wall
+  note: west wall, inside the start zone
+  texture: tag_1_tag36h11.png
+- id: 2
+  family: tag36h11
+  size_m: 0.18
+  drawing_size_m: 0.225
+  position:
+  - 6.0
+  - 4.973
+  - 0.4
+  rpy:
+  - -1.570796327
+  - 0.0
+  - 0.0
+  quaternion_xyzw:
+  - -0.707106781
+  - 0.0
+  - 0.0
+  - 0.707106781
+  normal:
+  - -0.0
+  - -1.0
+  - -0.0
+  frame_z:
+  - 0.0
+  - 1.0
+  - 0.0
+  board_position:
+  - 6.0
+  - 4.983
+  - 0.4
+  standoff_m: 0.01
+  mount: north_wall
+  note: mid-arena north wall, visible during traverse/return
+  texture: tag_2_tag36h11.png

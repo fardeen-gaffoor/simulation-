@@ -1,0 +1,38 @@
+# Perform one work cycle of an excavation phase.  **Module 6 implements this.**
+#
+# The behaviour sequencer in module 5 owns *where* and *when*; the excavation
+# mechanism owns *how*.  That split is deliberate:
+#
+#   * module 5 drives the rover to `work_pose` and holds it there,
+#   * module 6 runs the ladder/belt/tub cycle, using `/perception/mode` (set by
+#     module 5 to `excavate` or `dump`) to know which cameras it may rely on,
+#   * the cycle ends when module 6 says so, with how much sand it moved.
+#
+# The contract lives in this package even though module 6 is the server, because
+# module 5 is the caller and must be buildable and testable before the
+# excavation mechanism exists.  Until a server is present module 5 reports the
+# phase as unavailable and holds - it never assumes the sand moved.
+
+# --- goal ------------------------------------------------------------------
+string phase                    # "excavate" | "dump" (the PerceptionConfig modes)
+geometry_msgs/PoseStamped work_pose   # where the rover was told to work, map frame
+float32 timeout_s               # 0 = use navigation.mission.work_timeout_s
+float32 target_amount           # 0 = one bucket (excavate) / one tub (dump)
+                              # units are the server's; module 5 only logs them
+---
+# --- result ----------------------------------------------------------------
+bool success
+string message                  # "" on success, a reason otherwise
+float32 amount_moved            # sand moved this cycle, in the server's units
+float32 elapsed_s
+---
+# --- feedback --------------------------------------------------------------
+uint8 STAGE_STARTING=0
+uint8 STAGE_MOVING=1            # deploy / position the mechanism
+uint8 STAGE_WORKING=2           # digging or dumping
+uint8 STAGE_RETRACTING=3        # stow back to the travel attitude
+uint8 STAGE_DONE=4
+
+uint8 stage
+float32 progress                # 0..1 within the cycle
+string detail
