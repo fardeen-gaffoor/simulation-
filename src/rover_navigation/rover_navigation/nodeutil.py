@@ -302,19 +302,25 @@ class LogOnce:
         self.period_s = float(period_s)
         self._seen: Dict[str, float] = {}
 
-    def _emit(self, level: str, key: str, message: str, now: Optional[float]) -> None:
+    def _should_log(self, key: str, now: Optional[float]) -> bool:
         timestamp = now_seconds(self.node) if now is None else float(now)
         previous = self._seen.get(key)
         if previous is not None and (self.period_s <= 0.0 or timestamp - previous < self.period_s):
-            return
+            return False
         self._seen[key] = timestamp
-        getattr(self.node.get_logger(), level)(message)
+        return True
 
     def warn(self, key: str, message: str, now: Optional[float] = None) -> None:
-        self._emit("warn", key, message, now)
+        if self._should_log(key, now):
+            self.node.get_logger().warn(message)
 
     def info(self, key: str, message: str, now: Optional[float] = None) -> None:
-        self._emit("info", key, message, now)
+        if self._should_log(key, now):
+            self.node.get_logger().info(message)
+
+    def error(self, key: str, message: str, now: Optional[float] = None) -> None:
+        if self._should_log(key, now):
+            self.node.get_logger().error(message)
 
     def reset(self) -> None:
         self._seen.clear()

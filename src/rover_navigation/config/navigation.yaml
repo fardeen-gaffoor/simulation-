@@ -70,12 +70,12 @@ robot:
   build_width_m: 0.75
   radius_m: 0.0            # 0 = derive the inscribed radius (0.35 m)
   footprint_clearance_m: 0.06   # extra safety band outside the swept corridor
-  max_speed_mps: 0.45      # slow by design: the arena is 9 x 5 m of loose sand
-  max_yaw_rate_radps: 1.20
-  max_accel_mps2: 0.50
-  max_yaw_accel_radps2: 2.00
-  goal_tolerance_m: 0.12
-  goal_tolerance_yaw_rad: 0.20
+  max_speed_mps: 1.00      # increased for 10-min time limit
+  max_yaw_rate_radps: 2.00
+  max_accel_mps2: 1.00
+  max_yaw_accel_radps2: 4.00
+  goal_tolerance_m: 0.15
+  goal_tolerance_yaw_rad: 0.25
 
 # -----------------------------------------------------------------------------
 # The obstacle map.  A boulder is inflated to its footprint plus the rover's
@@ -93,12 +93,12 @@ robot:
 # -----------------------------------------------------------------------------
 costmap:
   resolution_m: 0.05
-  boulder_radius_scale: 1.00
-  crater_radius_scale: 0.80
-  inflation_m: 0.10        # soft-cost band beyond the lethal disc
-  soft_cost: 6.0
-  obstacle_memory_s: 60.0  # remember an obstacle this long; 0 = for the whole run
-  stale_obstacle_s: 2.5    # not re-seen for this long -> reported, still lethal
+  boulder_radius_scale: 0.80
+  crater_radius_scale: 1.00
+  inflation_m: 0.20        # reduced soft-cost band for better maneuverability
+  soft_cost: 4.0
+  obstacle_memory_s: 0.0  # remember confirmed obstacles for the whole run
+  stale_obstacle_s: 1.0    # not re-seen for this long -> reported, still lethal
   memory_associate_m: 0.35 # merge two observations closer than this into one obstacle
   min_observations: 3      # only memorise obstacles module 4 has confirmed this often
   min_confidence: 0.30     # ... and that carry at least this tracker confidence
@@ -113,30 +113,30 @@ costmap:
 # -----------------------------------------------------------------------------
 planner:
   allow_diagonal: true
-  heuristic_weight: 1.00   # 1.0 = optimal A*; > 1 = faster, slightly longer
+  heuristic_weight: 1.50   # 1.0 = optimal A*; > 1 = faster, slightly longer
   unknown_is_free: true
   max_expansions: 200000
   smoothing: true
   smoothing_passes: 64
   waypoint_spacing_m: 0.10
-  snap_radius_m: 0.50      # how far a blocked start/goal may be nudged to a free cell
+  snap_radius_m: 1.00      # how far a blocked start/goal may be nudged to a free cell
 
 # -----------------------------------------------------------------------------
 # The controller: pure pursuit with an in-place turn phase (the rover is a
 # skid-steer, so it can turn without translating - that is how it starts a leg).
 # -----------------------------------------------------------------------------
 controller:
-  lookahead_m: 0.55
-  min_lookahead_m: 0.30
-  max_lookahead_m: 0.90
+  lookahead_m: 0.75
+  min_lookahead_m: 0.35
+  max_lookahead_m: 1.20
   lookahead_speed_gain: 0.80
-  heading_gain: 1.40
-  in_place_turn_rad: 0.55  # heading error above this -> turn on the spot first
-  in_place_yaw_rate_radps: 0.90
+  heading_gain: 2.50
+  in_place_turn_rad: 0.20  # heading error above this -> turn on the spot first
+  in_place_yaw_rate_radps: 1.50
   slowdown_distance_m: 0.75
-  min_speed_mps: 0.08
-  goal_timeout_s: 120.0
-  replan_period_s: 1.00
+  min_speed_mps: 0.04       # allow crawling to the goal instead of overshooting
+  goal_timeout_s: 300.0
+  replan_period_s: 0.50
   pose_timeout_s: 1.00
 
 # -----------------------------------------------------------------------------
@@ -153,7 +153,7 @@ safety:
   sigma_yaw_stop_rad: 10.0
   max_time_since_fix_s: 1000000.0
   require_localized: false  # never drive in the map frame without a fix
-  emergency_stop_m: 0.25   # reactive brake: an obstacle this close ahead -> stop
+  emergency_stop_m: 0.40   # reactive brake: an obstacle this close ahead -> stop
   gate_rate_hz: 20.0
 
 # -----------------------------------------------------------------------------
@@ -195,9 +195,9 @@ mission:
     inset_m: 0.30          # inset along the berm target's long axis
     standoff_m: 0.05       # gap between the swept circle and the berm target edge
   park:
-    x: 2.00                # back in the start zone, clear of the berm and west wall
+    x: 1.00                # back in the start zone, clear of the berm and walls
     y: 3.80
-    yaw: 0.0               # face north (toward north wall tags at y=5)
+    yaw: 1.5708            # face north (toward north wall tags at y=5), not out the east edge
 
 # -----------------------------------------------------------------------------
 # Topics.  Identical in simulation and on the rover: nothing in module 5 knows

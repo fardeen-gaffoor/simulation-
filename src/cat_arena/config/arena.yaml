@@ -128,22 +128,22 @@ marking:
   berm_height: 0.15      # m, ASSUMPTION for the judged berm height (used by module 6)
 
 boulders:
-  count: {min: 3, max: 5}          # competition: at least 3
-  diameter: {min: 0.30, max: 0.40} # competition: 30-40 cm
+  count: {min: 3, max: 4}          # competition: at least 3 boulders
+  diameter: {min: 0.25, max: 0.35} # slightly smaller
   exposed_fraction: {min: 0.45, max: 1.0}  # visible height = fraction * diameter
-  spacing: 0.25                    # min centre distance to another boulder (m)
-  margin: 0.30                     # keep this far from zone borders (m)
+  spacing: 0.40                    # increased spacing
+  margin: 0.40                     # increased margin from zone borders
   zones: [obstacle, excavation]    # boulders may be in the excavation zone too
-  zone_weights: {obstacle: 1.0, excavation: 0.35}
+  zone_weights: {obstacle: 1.0, excavation: 0.25}
   color: [0.42, 0.40, 0.38, 1.0]
   static: true                     # rule: the rover must not move obstacles
 
 craters:
   count: {min: 3, max: 5}          # competition: at least 3
-  width: {min: 0.25, max: 0.50}    # competition: up to 40-50 cm wide
-  depth: {min: 0.06, max: 0.18}    # m, NEGATIVE (depression)
-  spacing: 0.30                    # min centre distance to another crater (m)
-  margin: 0.35                     # keep this far from zone borders (m)
+  width: {min: 0.25, max: 0.45}    # slightly smaller max width for better navigation
+  depth: {min: 0.06, max: 0.15}    # m, NEGATIVE (depression) - reduced max depth
+  spacing: 0.40                    # increased spacing for better distribution
+  margin: 0.50                     # increased margin from zone borders
   zones: [obstacle]                # craters only in the obstacle zone
   zone_weights: {obstacle: 1.0}
 

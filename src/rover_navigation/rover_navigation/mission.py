@@ -81,7 +81,7 @@ PERCEPTION_MODES = ("idle", "nav", "tag", "excavate", "dump", "degraded")
 
 _PHASE_MODES = {
     PHASE_IDLE: "idle",
-    PHASE_ACQUIRE: "nav",     # use cam_nav (tilted down, wide FOV) to see side-mounted tags
+    PHASE_ACQUIRE: "tag",
     PHASE_TRAVEL_TO_DIG: "nav",
     PHASE_EXCAVATE: "excavate",
     PHASE_TRAVEL_TO_DUMP: "nav",
@@ -436,22 +436,9 @@ class MissionSequencer:
             self._request_nav(Waypoint(x=park.x, y=park.y, yaw=park.yaw, label="acquire staging"), command)
             return
         if self._acquire_staged:
-            # The park pose (facing north) already points toward the north wall
-            # tags.  No need to spin - just wait for the tag localizer to get a fix.
-            # If we haven't localized after a short grace period, try a small
-            # adjustment turn instead of a full 180° spin which can hit walls.
-            self.detail = "waiting for tag fix at park pose"
-            if now - self._phase_started > 10.0:
-                # Try a gentle 90° turn to scan for tags
-                self._request_nav(
-                    Waypoint(
-                        x=pose.x,
-                        y=pose.y,
-                        yaw=wrap_angle(pose.yaw + math.pi / 2),
-                        label="tag search adjust",
-                    ),
-                    command,
-                )
+            heading = wrap_angle(pose.yaw + self.config.mission.acquire_spin_rad)
+            self.detail = "turning on the spot to search for a wall tag"
+            self._request_nav(Waypoint(x=pose.x, y=pose.y, yaw=heading, label="acquire search turn"), command)
             return
 
     def _tick_travel_to_dig(self, now, *, pose, localized, work_available, command) -> None:

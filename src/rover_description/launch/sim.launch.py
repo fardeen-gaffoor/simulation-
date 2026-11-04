@@ -115,6 +115,14 @@ def _launch_setup(context, *args, **kwargs):
                 }
             ],
         ),
+        # -- simple hardcoded drive: dig zone -> dump zone (demo) ---------------
+        Node(
+            package="rover_description",
+            executable="simple_drive.py",
+            name="simple_drive",
+            output="screen",
+            parameters=[{"use_sim_time": True}],
+        ),
     ]
     return actions
 

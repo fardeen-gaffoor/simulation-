@@ -121,7 +121,12 @@ class PurePursuitController:
 
         # -- turn first when badly misaligned ------------------------------ #
         if abs(alpha) > cfg.in_place_turn_rad and not force_drive:
-            yaw_rate = math.copysign(cfg.in_place_yaw_rate_radps, alpha)
+            # Proportional turn rate: slower close to the threshold so the rover
+            # does not overshoot and oscillate left/right; full rate only when
+            # the error is large.  Easing also tapers the last few degrees.
+            ease = min(1.0, abs(alpha) / (cfg.in_place_turn_rad * 2.0))
+            yaw_rate = cfg.in_place_yaw_rate_radps * ease
+            yaw_rate = math.copysign(yaw_rate, alpha)
             yaw_rate = min(yaw_rate, robot.max_yaw_rate_radps) if yaw_rate >= 0 else max(yaw_rate, -robot.max_yaw_rate_radps)
             yaw_rate = self._shape_turn(alpha, yaw_rate)
             return ControlCommand(0.0, yaw_rate, "turning", arc_remaining, yaw_error_goal, heading_error, target, False)
@@ -137,9 +142,14 @@ class PurePursuitController:
         yaw_rate = curvature * speed
         yaw_rate = max(-robot.max_yaw_rate_radps, min(robot.max_yaw_rate_radps, yaw_rate))
         if abs(alpha) > cfg.in_place_turn_rad * 0.5 and arc_remaining < cfg.slowdown_distance_m and not force_drive:
-            # Close to the goal and still crooked: turn rather than arc.
-            return ControlCommand(0.0, math.copysign(cfg.in_place_yaw_rate_radps, alpha), "turning",
-                                  arc_remaining, yaw_error_goal, heading_error, target, False)
+            # Close to the goal and still crooked: keep driving forward while
+            # steering, rather than spinning in place.  Pure pursuit curvature
+            # corrects the heading while the rover still makes progress toward
+            # the goal; spinning in place risks never converging on the pose.
+            speed = max(cfg.min_speed_mps, speed * 0.5)
+            yaw_rate = curvature * speed
+            yaw_rate = max(-robot.max_yaw_rate_radps, min(robot.max_yaw_rate_radps, yaw_rate))
+            return ControlCommand(speed, yaw_rate, "driving", arc_remaining, yaw_error_goal, heading_error, target, False)
         return ControlCommand(speed, yaw_rate, "driving", arc_remaining, yaw_error_goal, heading_error, target, False)
 
     def stop(self) -> ControlCommand:

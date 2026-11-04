@@ -275,7 +275,7 @@ class NavigationNode(Node):
                 f"refusing goal ({pose.x:.2f}, {pose.y:.2f}, yaw {pose.yaw:.2f}): {blocked}"
             )
             goal_handle.abort()
-            return
+            return self._build_result(False, f"goal refused: {blocked}", 0.0, 0.0, 0.0, 0.0)
 
         # One goal at a time: the newest wins.  The superseded goal's callback is
         # waiting on its own future, so resolving it lets that callback return; the

@@ -161,15 +161,15 @@ sand:
 # matching the WorkCycle action's STAGE_*.
 # -----------------------------------------------------------------------------
 cycle:
-  settle_s: 0.40          # pause after the belt stops, before retracting
+  settle_s: 0.20          # pause after the belt stops, before retracting
   dig:
-    min_s: 2.0            # always run the belt at least this long
-    timeout_s: 60.0       # give up and fault past this
-    target_fill: 0.95     # stop when the tub is this full
+    min_s: 1.0            # always run the belt at least this long
+    timeout_s: 30.0       # give up and fault past this
+    target_fill: 0.90     # stop when the tub is this full
   dump:
-    min_s: 1.5
-    timeout_s: 30.0
-    target_empty: 0.02    # stop when the tub is this empty
+    min_s: 1.0
+    timeout_s: 20.0
+    target_empty: 0.05    # stop when the tub is this empty
 
 # -----------------------------------------------------------------------------
 # How the mechanism is actually commanded.  This is the ONLY place that knows

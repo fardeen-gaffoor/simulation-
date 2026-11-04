@@ -28,6 +28,7 @@ install(PROGRAMS
   scripts/generate_robot.py
   scripts/check_envelope.py
   scripts/mass_budget.py
+  scripts/simple_drive.py
   scripts/stub_topics.py
   DESTINATION lib/${PROJECT_NAME}
 )

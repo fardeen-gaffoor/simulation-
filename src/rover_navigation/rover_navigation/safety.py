@@ -35,6 +35,7 @@ from typing import Optional, Sequence, Tuple
 
 from .config import NavigationConfig
 from .costmap import ObstacleRecord
+from .footprint import rect_corners
 from .geometry import Pose3
 
 __all__ = ["LocalizationSnapshot", "GateDecision", "VelocityGate"]
@@ -152,6 +153,37 @@ class VelocityGate:
                 )
         return None
 
+    def arena_boundary_reason(self, pose: Pose3, forward: bool) -> Optional[str]:
+        """Stop the rover if its body is already outside the arena's free rect,
+        or if driving forward would carry its front bumper outside it.
+
+        This is the hard safety net that keeps the rover from driving off the
+        arena edge even if the planner or controller lets a path graze it.
+        """
+        cfg = self.config.safety
+        # The rover's *corners* must not cross the wall margin line, so check
+        # against the arena inset by wall_margin only (not wall_margin +
+        # radius - free_rect is where the centre may go, and we're checking
+        # corners here).  This matches footprint_block.
+        wall = self.config.arena.rect.inset(self.config.arena.wall_margin_m)
+        half_length = 0.5 * self.config.robot.length_m
+        half_width = 0.5 * self.config.robot.width_m
+
+        # If the rover's own body is already outside, stop no matter what.
+        for cx, cy in rect_corners(pose.x, pose.y, pose.yaw, half_length, half_width):
+            if not (wall.x0 <= cx <= wall.x1 and wall.y0 <= cy <= wall.y1):
+                return f"rover body outside the arena at ({cx:.2f}, {cy:.2f})"
+
+        # If driving forward, project the front bumper one emergency-stop
+        # distance ahead and stop if it would leave the arena.
+        if forward:
+            front_x = pose.x + math.cos(pose.yaw) * (half_length + cfg.emergency_stop_m)
+            front_y = pose.y + math.sin(pose.yaw) * (half_length + cfg.emergency_stop_m)
+            if not (wall.x0 <= front_x <= wall.x1 and wall.y0 <= front_y <= wall.y1):
+                return f"front bumper would leave the arena at ({front_x:.2f}, {front_y:.2f})"
+
+        return None
+
     # -- the tick ----------------------------------------------------------- #
     def decide(
         self,
@@ -210,6 +242,9 @@ class VelocityGate:
             brake = self.emergency_brake_reason(pose, records, forward=linear > 0.0)
             if brake is not None:
                 return hold(brake, scale=scale, emergency=True)
+            boundary = self.arena_boundary_reason(pose, linear > 0.0)
+            if boundary is not None:
+                return hold(boundary, scale=scale, emergency=True)
 
         linear = max(-max_speed, min(max_speed, linear))
         angular = max(-max_yaw, min(max_yaw, angular))
