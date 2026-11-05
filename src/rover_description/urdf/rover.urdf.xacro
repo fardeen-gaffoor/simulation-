@@ -38,6 +38,7 @@
   <xacro:property name="j_fric"   value="${cfg['drive']['joint_friction']}"/>
   <xacro:property name="max_torque" value="${cfg['drive']['max_wheel_torque']}"/>
   <xacro:property name="max_wvel"  value="${cfg['drive']['max_wheel_velocity']}"/>
+  <xacro:property name="wheel_accel" value="${cfg['drive']['max_wheel_acceleration']}"/>
   <xacro:property name="wheel_mu"  value="${cfg['drive']['wheel_mu']}"/>
   <xacro:property name="wheel_mu2" value="${cfg['drive']['wheel_mu2']}"/>
   <xacro:property name="wheel_rgba"
@@ -119,12 +120,12 @@
   <xacro:fixed_joint name="tub_joint" parent="base_link" child="tub_link"
     xyz="${cfg['excavation']['tub']['center'][0]} ${cfg['excavation']['tub']['center'][1]} ${cfg['excavation']['tub']['center'][2]}"/>
 
-  <xacro:box_link name="funnel_link"
-    size="${cfg['excavation']['funnel']['size'][0]} ${cfg['excavation']['funnel']['size'][1]} ${cfg['excavation']['funnel']['size'][2]}"
-    rgba="${cfg['excavation']['funnel']['color'][0]} ${cfg['excavation']['funnel']['color'][1]} ${cfg['excavation']['funnel']['color'][2]} ${cfg['excavation']['funnel']['color'][3]}"
-    ikey="funnel_link"/>
-  <xacro:fixed_joint name="funnel_joint" parent="base_link" child="funnel_link"
-    xyz="${cfg['excavation']['funnel']['center'][0]} ${cfg['excavation']['funnel']['center'][1]} ${cfg['excavation']['funnel']['center'][2]}"/>
+      <xacro:box_link name="funnel_link"
+        size="${cfg['excavation']['funnel']['size'][0]} ${cfg['excavation']['funnel']['size'][1]} ${cfg['excavation']['funnel']['size'][2]}"
+        rgba="${cfg['excavation']['funnel']['color'][0]} ${cfg['excavation']['funnel']['color'][1]} ${cfg['excavation']['funnel']['color'][2]} ${cfg['excavation']['funnel']['color'][3]}"
+        ikey="funnel_link"/>
+      <xacro:fixed_joint name="funnel_joint" parent="base_link" child="funnel_link"
+        xyz="${cfg['excavation']['funnel']['center'][0]} ${cfg['excavation']['funnel']['center'][1]} ${cfg['excavation']['funnel']['center'][2]}"/>
 
   <!-- ==================================================================== -->
   <!-- cameras: link + fixed joint + optical frame + gz sensor              -->
@@ -176,6 +177,27 @@
     </gazebo>
   </xacro:if>
 
+  <!-- dig / dump particle effects (visual only)                            -->
+  <!--                                                                      -->
+  <!-- Particle emitters are part of the spawned link SDF.  Module 6 turns  -->
+  <!-- them on and off with their gz cmd topics while the belt is running;  -->
+  <!-- they carry no mass and do not affect the physics.                    -->
+  <!-- ==================================================================== -->
+  <gazebo reference="base_link">
+  <!--     <particle_emitter name="dump_sand" type="point"> -->
+  <!--       <pose>-0.22 0 0.14 0 0 0</pose> -->
+  <!--       <particle_size>0.030 0.030 0.030</particle_size> -->
+  <!--       <lifetime>2.2</lifetime> -->
+  <!--       <rate>700</rate> -->
+  <!--       <min_velocity>0.08</min_velocity> -->
+  <!--       <max_velocity>0.55</max_velocity> -->
+  <!--       <scale_rate>0.18</scale_rate> -->
+  <!--       <color_start>0.76 0.62 0.36 1.0</color_start> -->
+  <!--       <color_end>0.90 0.80 0.56 0.0</color_end> -->
+  <!--       <emitting>false</emitting> -->
+  <!--     </particle_emitter> -->
+  </gazebo>
+
   <!-- ==================================================================== -->
   <!-- gz model plugins: skid-steer diff drive + joint states               -->
   <!-- ==================================================================== -->
@@ -188,7 +210,7 @@
       <wheel_separation>${track}</wheel_separation>
       <wheel_radius>${wheel_r}</wheel_radius>
       <max_wheel_torque>${max_torque}</max_wheel_torque>
-      <max_wheel_acceleration>3.0</max_wheel_acceleration>
+      <max_wheel_acceleration>${wheel_accel}</max_wheel_acceleration>
       <topic>${t_cmd_vel}</topic>
       <odom_topic>${t_odom}</odom_topic>
       <tf_topic>${t_tf}</tf_topic>
@@ -242,6 +264,21 @@
       <cmd_max>20.0</cmd_max>
       <cmd_min>-20.0</cmd_min>
     </plugin>
+  </gazebo>
+
+  <gazebo reference="ladder_link">
+  <!--     <particle_emitter name="dig_dust" type="point"> -->
+  <!--       <pose>${lad_len - 0.05} 0 0.03 0 0 0</pose> -->
+  <!--       <particle_size>0.022 0.022 0.022</particle_size> -->
+  <!--       <lifetime>1.4</lifetime> -->
+  <!--       <rate>450</rate> -->
+  <!--       <min_velocity>0.40</min_velocity> -->
+  <!--       <max_velocity>1.40</max_velocity> -->
+  <!--       <scale_rate>0.22</scale_rate> -->
+  <!--       <color_start>0.74 0.60 0.35 1.0</color_start> -->
+  <!--       <color_end>0.88 0.78 0.55 0.0</color_end> -->
+  <!--       <emitting>false</emitting> -->
+  <!--     </particle_emitter> -->
   </gazebo>
 
 </robot>

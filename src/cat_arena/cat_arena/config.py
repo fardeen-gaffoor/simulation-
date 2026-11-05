@@ -176,13 +176,33 @@ class Physics:
 
 @dataclass(frozen=True)
 class TerrainCfg:
-    cell_size: float
-    skirt: bool
-    noise_amplitude: float
-    noise_wavelength: float
-    albedo_texture: bool
-    texture_size: int
-    heightmap_png: bool
+    use_heightmap: bool = True
+    heightmap_png: str = "height.png"
+    heightmap_resolution: float = 0.05
+    max_relief: float = 0.4
+    skirt: bool = True
+    sand_depth: float = 0.30
+    albedo_texture: bool = True
+    texture_size: int = 1024
+    normal_map: bool = True
+    friction: Friction = None  # type: ignore
+
+    # Backward compatibility properties (computed)
+    @property
+    def cell_size(self) -> float:
+        return self.heightmap_resolution
+
+    @property
+    def noise_amplitude(self) -> float:
+        return 0.0  # No ripple noise in heightmap mode
+
+    @property
+    def noise_wavelength(self) -> float:
+        return 3.0
+
+    @property
+    def heightmap_png_bool(self) -> bool:
+        return True
 
 
 @dataclass(frozen=True)
@@ -675,24 +695,33 @@ def _parse(cfg_raw: Dict[str, Any], path: str) -> ArenaConfig:
         )
 
     terrain_raw = dict(cfg_raw.get("terrain", {}))
-    terrain = TerrainCfg(
-        cell_size=_as_float(terrain_raw.get("cell_size", 0.05), "terrain.cell_size"),
-        skirt=bool(terrain_raw.get("skirt", True)),
-        noise_amplitude=_as_float(terrain_raw.get("noise_amplitude", 0.0), "terrain.noise_amplitude"),
-        noise_wavelength=_as_float(terrain_raw.get("noise_wavelength", 3.0), "terrain.noise_wavelength"),
-        albedo_texture=bool(terrain_raw.get("albedo_texture", True)),
-        texture_size=int(terrain_raw.get("texture_size", 512)),
-        heightmap_png=bool(terrain_raw.get("heightmap_png", True)),
+    friction_raw = dict(terrain_raw.get("friction", {"mu": 0.9, "mu2": 0.9}))
+    terrain_friction = Friction(
+        mu=_as_float(_require(friction_raw, "mu", "terrain.friction"), "terrain.friction.mu"),
+        mu2=_as_float(_require(friction_raw, "mu2", "terrain.friction"), "terrain.friction.mu2"),
     )
-    if terrain.cell_size < 0.02:
-        raise ConfigError(
-            f"terrain.cell_size {terrain.cell_size} m is below the 0.02 m floor "
-            "(mesh would exceed ~230k triangles for a 9x5 m arena)"
-        )
-    if terrain.noise_wavelength <= 0:
-        raise ConfigError("terrain.noise_wavelength must be > 0")
+    terrain = TerrainCfg(
+        use_heightmap=bool(terrain_raw.get("use_heightmap", True)),
+        heightmap_png=str(terrain_raw.get("heightmap_png", "height.png")),
+        heightmap_resolution=_as_float(terrain_raw.get("heightmap_resolution", 0.05), "terrain.heightmap_resolution"),
+        max_relief=_as_float(terrain_raw.get("max_relief", 0.4), "terrain.max_relief"),
+        skirt=bool(terrain_raw.get("skirt", True)),
+        sand_depth=_as_float(terrain_raw.get("sand_depth", 0.30), "terrain.sand_depth"),
+        albedo_texture=bool(terrain_raw.get("albedo_texture", True)),
+        texture_size=int(terrain_raw.get("texture_size", 1024)),
+        normal_map=bool(terrain_raw.get("normal_map", True)),
+        friction=terrain_friction,
+    )
+    if terrain.heightmap_resolution <= 0:
+        raise ConfigError("terrain.heightmap_resolution must be > 0")
+    if terrain.max_relief < 0:
+        raise ConfigError("terrain.max_relief must be >= 0")
+    if terrain.sand_depth < 0:
+        raise ConfigError("terrain.sand_depth must be >= 0")
     if terrain.texture_size < 32:
         raise ConfigError("terrain.texture_size must be >= 32")
+    if terrain.friction.mu <= 0 or terrain.friction.mu2 <= 0:
+        raise ConfigError("terrain.friction mu and mu2 must be > 0")
 
     zones: Dict[str, Zone] = {}
     zones_raw = dict(_require(cfg_raw, "zones", path))

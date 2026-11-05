@@ -2,14 +2,14 @@
 
 One call produces a complete, self-describing arena for a given seed:
 
-    arena.sdf            Gazebo world (terrain mesh, walls, zone markings, markers, boulders)
-    terrain.obj / .mtl   triangle terrain with real crater pits (visual + collision)
-    sand_albedo.png      procedural dry-sand texture
-    terrain_height.png   heightfield artifact for analysis/labels (never loaded by gz)
+    arena.sdf            Gazebo world (heightmap terrain, walls, zone markings, markers, boulders)
+    height.png           heightmap for Gazebo (2^n+1 x 2^n+1, 8-bit grayscale)
+    sand_diffuse.png     procedural dry-sand diffuse texture
+    sand_normal.png      procedural sand normal map
     ground_truth.yaml    oracle data - TESTS AND LABELS ONLY
     markers.yaml         marker board poses + apriltag_ros handoff block for module 4
     start_pose.yaml      the sampled random spawn pose
-    manifest.json        seed, file hashes, versions, assumptions
+    manifest.json        seed, config hash, file hashes, versions, assumptions
 
 Determinism: for a fixed seed and configuration every generated file except
 ``manifest.json``'s timestamp is byte-identical.
@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import platform
 import shutil
@@ -43,10 +44,9 @@ from .start_pose import StartPose, sample_start_pose
 from .terrain import (
     Crater,
     TerrainField,
-    build_mesh,
+    build_heightmap,
     write_heightmap_png,
-    write_obj_mesh,
-    write_sand_albedo,
+    write_sand_textures,
 )
 
 __all__ = ["GenerationResult", "GenerationError", "generate", "main"]
@@ -181,43 +181,50 @@ def generate(
     os.makedirs(target, exist_ok=True)
 
     # -- 1. obstacles ------------------------------------------------------
-    # Boulders are seated on the *ripple-only* surface: boulder/crater spacing is
+    # Boulders are seated on the *flat* surface: boulder/crater spacing is
     # enforced, so no boulder can sit inside a crater.
-    ripple_field = TerrainField(cfg, [], phases=rng_numpy(master, "terrain_phases").random(3))
-    layout = place_obstacles(cfg, master, ripple_field)
+    flat_field = TerrainField(cfg, [], phases=rng_numpy(master, "terrain_phases").random(3))
+    layout = place_obstacles(cfg, master, flat_field)
     if verbose:
         print(f"[cat_arena] seed {master}: {len(layout.boulders)} boulders, "
               f"{len(layout.craters)} craters")
 
-    # -- 2. terrain (craters carved into the mesh) -------------------------
+    # -- 2. terrain (heightmap with craters) -------------------------------
+    # Get flat zones for masking
+    flat_zone_names = ['start', 'construction', 'berm_target', 'left_corridor']
+    flat_zones = [(cfg.zone(name).rect.x0, cfg.zone(name).rect.y0, cfg.zone(name).rect.x1, cfg.zone(name).rect.y1)
+                  for name in flat_zone_names]
+
     field = TerrainField(cfg, layout.craters, phases=rng_numpy(master, "terrain_phases").random(3))
-    mesh = build_mesh(cfg, field)
-    obj_path = os.path.join(target, "terrain.obj")
-    terrain_stats: Dict[str, Any] = write_obj_mesh(obj_path, cfg, mesh)
+    heightmap = build_heightmap(cfg, layout.craters, seed=master, flat_zones=flat_zones)
 
+    # Save heightmap PNG
+    hm_filename = cfg.terrain.heightmap_png
+    hm_path = os.path.join(target, hm_filename)
+    terrain_stats: Dict[str, Any] = write_heightmap_png(hm_path, heightmap, 0.0, cfg.terrain.max_relief)
+
+    # Generate sand textures
     albedo_file: Optional[str] = None
+    normal_file: Optional[str] = None
     if cfg.terrain.albedo_texture:
-        albedo_path = os.path.join(target, "sand_albedo.png")
-        terrain_stats["albedo"] = write_sand_albedo(albedo_path, cfg, rng_numpy(master, "albedo"))
-        albedo_file = os.path.basename(albedo_path)
-
-    heightmap_file: Optional[str] = None
-    if cfg.terrain.heightmap_png:
-        z_min = mesh.z_min - 0.01
-        z_max = max(mesh.z_max, 0.0) + 0.01
-        hm_path = os.path.join(target, "terrain_height.png")
-        terrain_stats["heightmap"] = write_heightmap_png(hm_path, mesh, z_min, z_max)
-        heightmap_file = os.path.basename(hm_path)
+        albedo_path = os.path.join(target, "sand_diffuse.png")
+        normal_path = os.path.join(target, "sand_normal.png") if cfg.terrain.normal_map else None
+        texture_stats = write_sand_textures(albedo_path, normal_path, cfg, rng_numpy(master, "textures"))
+        albedo_file = texture_stats["diffuse"]["file"]
+        if "normal" in texture_stats:
+            normal_file = texture_stats["normal"]["file"]
+        terrain_stats.update(texture_stats)
 
     assets = WorldAssets(
-        obj_file=os.path.basename(obj_path),
-        mtl_file=str(terrain_stats["mtl"]),
+        heightmap_file=hm_filename,
+        mtl_file=None,
         albedo_file=albedo_file,
-        heightmap_file=heightmap_file,
+        normal_file=normal_file,
     )
 
     # -- 3. spawn pose -----------------------------------------------------
-    start_pose = sample_start_pose(cfg, master, surface=field.height)
+    # Use flat field for spawn pose sampling (flat in start zone)
+    start_pose = sample_start_pose(cfg, master, surface=flat_field.height)
 
     # -- 4. world ----------------------------------------------------------
     world_text = build_world_sdf(
@@ -243,16 +250,34 @@ def generate(
         "gz_sim": _gz_sim_version(),
     }
     files: Dict[str, Any] = {}
-    for name in ("arena.sdf", "terrain.obj", "terrain.mtl", "sand_albedo.png", "terrain_height.png"):
+    for name in ("arena.sdf", "height.png", "sand_diffuse.png", "sand_normal.png"):
         candidate = os.path.join(target, name)
         if os.path.isfile(candidate):
             files[name] = {"bytes": os.path.getsize(candidate), "sha256": _sha256(candidate)}
+
+    # Create minimal mesh-like object for ground truth compatibility
+    class MockMesh:
+        def __init__(self, heightmap):
+            self.xs = np.linspace(0, cfg.length_x, heightmap.shape[1])
+            self.ys = np.linspace(0, cfg.width_y, heightmap.shape[0])
+            self.z = heightmap
+            self.skirt_depth = cfg.terrain.sand_depth if cfg.terrain.skirt else 0.0
+            self.cell_x = float(self.xs[1] - self.xs[0]) if len(self.xs) > 1 else 0.0
+            self.cell_y = float(self.ys[1] - self.ys[0]) if len(self.ys) > 1 else 0.0
+            self.triangle_count = 0
+            self.vertex_count = heightmap.size
+        @property
+        def z_min(self): return float(self.z.min())
+        @property
+        def z_max(self): return float(self.z.max())
+
+    mock_mesh = MockMesh(heightmap)
 
     ground_truth = build_ground_truth(
         cfg=cfg,
         seed=master,
         layout=layout,
-        mesh=mesh,
+        mesh=mock_mesh,
         terrain_stats=terrain_stats,
         start_pose=start_pose,
         files=files,

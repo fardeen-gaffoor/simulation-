@@ -4,9 +4,9 @@ schema_version: 1
 frame: map
 family: tag36h11
 source:
-  markers: /home/fewest/cat/worlds/seed_1/markers.yaml
-  markers_sha256: 5964830d5d0d68d486024054561b60d759e12ff7e8b2347c8462875cbc3a3d15
-  markers_seed: 1
+  markers: /home/fewest/cat/worlds/seed_7/markers.yaml
+  markers_sha256: 77bc8226c424e649918e455f94f8af43115d6b38f91b3b32f68198d8931f818a
+  markers_seed: 7
   standoff_m: 0.01
   protrusion_m: 0.007
   lift_m: 0.003

@@ -115,14 +115,24 @@ def _launch_setup(context, *args, **kwargs):
                 }
             ],
         ),
-        # -- simple hardcoded drive: dig zone -> dump zone (demo) ---------------
+        # -- excavation mechanism: manual dig/dump (V/B in the teleop) --------
         Node(
-            package="rover_description",
-            executable="simple_drive.py",
-            name="simple_drive",
+            package="rover_excavation",
+            executable="excavation.py",
+            name="rover_excavation_mechanism",
             output="screen",
-            parameters=[{"use_sim_time": True}],
+            parameters=[
+                {
+                    "use_sim_time": True,
+                    "backend": "sim",
+                    "publish_marker": True,
+                    "manual_topic": "/excavation/manual",
+                }
+            ],
         ),
+        # Keyboard teleop is NOT started here: it needs a real terminal for raw
+        # keystrokes.  Run it in a second terminal with:
+        #   ros2 run rover_description teleop_keyboard.py
     ]
     return actions
 

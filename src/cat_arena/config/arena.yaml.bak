@@ -1,0 +1,234 @@
+# =============================================================================
+# cat_arena / arena.yaml  -- SINGLE SOURCE OF TRUTH for the challenge arena.
+#
+# EVERY dimension and tunable of the simulated arena lives in this file.
+# Nothing else in the stack is allowed to hard-code arena geometry: the world
+# generator, the launch files, the tests and (later) the nav2 map all read it.
+#
+# FRAME CONVENTION
+#   Arena origin (0,0,0) = the WEST-SOUTH inner corner of the arena floor, at
+#   the mean sand surface level.
+#     +x -> east   (the 9.0 m side, start zone at low x, excavation zone at high x)
+#     +y -> north  (the 5.0 m side, construction zone at low y, start zone at high y)
+#     +z -> up
+#   Angles are radians unless the key name ends in "_deg".
+#   "top-left" of the challenge diagram  -> north-west corner of this frame.
+#   "bottom-left" of the challenge diagram -> south-west corner of this frame.
+#
+# PROVENANCE OF THE NUMBERS (flagged, per user instruction)
+#   * Arena 9.0 x 5.0 m and sand depth 0.30 m: given as ground truth.
+#   * Zone rectangles are SCALED FROM THE DIAGRAM and are marked
+#     "assumption: needs organizer confirmation" below.
+#   * Wall height 0.5 m is an ASSUMPTION (the challenge only says that ramming
+#     a wall costs -50 points, therefore walls exist physically). Parameterised
+#     here so it can be corrected in one place.
+#   * Friction mu = mu2 = 0.6 is an ASSUMED starting value for dry tilled sand
+#     (literature range 0.5-0.7). Tune here, one place only.
+# =============================================================================
+
+schema_version: 1
+
+meta:
+  name: "Caterpillar Autonomy Challenge - berm construction arena"
+  layout_provenance: "zone rectangles scaled from the challenge diagram; TO BE CONFIRMED with the organizers"
+  world_name: "cat_arena"
+
+arena:
+  length_x: 9.0          # m, east-west  (competition ground truth)
+  width_y: 5.0           # m, north-south (competition ground truth)
+  sand_depth: 0.30       # m, tilled dry sand layer (competition ground truth)
+  # Sand friction. ASSUMED starting value, single place to tune.
+  friction:
+    mu: 0.6
+    mu2: 0.6
+  # Wall geometry around the arena perimeter. The arena floor [0,L]x[0,W] is
+  # exactly the drivable area; walls sit OUTSIDE those bounds so their inner
+  # faces are flush with the arena border.
+  walls:
+    present: true
+    height: 0.50         # ASSUMPTION: 0.5 m wall height (not given in the rules)
+    thickness: 0.06      # ASSUMPTION
+    color: [0.55, 0.55, 0.57, 1.0]
+  # Fallback sand albedo when terrain.albedo_texture is false.
+  sand_color: [0.84, 0.78, 0.58, 1.0]
+
+physics:
+  engine: dartsim
+  # Heightmap-free triangle-mesh terrain requires the bullet collision detector
+  # for DART; this was verified on the dev laptop (see README "verified facts").
+  collision_detector: bullet
+  max_step_size: 0.001
+  real_time_factor: 1.0
+  gravity: [0.0, 0.0, -9.8]
+
+terrain:
+  cell_size: 0.05        # m, mesh grid resolution (0.05 -> 181x101 = 36k triangles)
+  skirt: true            # add vertical skirt + lid-less side walls of sand_depth
+  noise_amplitude: 0.0   # m, long-wavelength sand ripple amplitude (0 for clean drive tests)
+  noise_wavelength: 3.0  # m
+  albedo_texture: true   # generate a procedural sand albedo texture (visual only)
+  texture_size: 512      # px
+  heightmap_png: true    # also emit a heightfield PNG artifact (tools/labels only)
+
+# -----------------------------------------------------------------------------
+# Zones. rect = [x0, y0, x1, y1] in the arena frame.
+# The five "tiling" zones must exactly partition the arena; the validator
+# enforces this so a typo in the diagram scaling is caught immediately.
+# All zone visualisations are VISUAL-ONLY (no collision).
+# -----------------------------------------------------------------------------
+zones:
+  start:
+    rect: [0.0, 2.70, 2.0, 5.00]        # 2.0 x 2.3 m, TOP-LEFT (north-west)
+    color: [0.16, 0.78, 0.24, 1.0]
+    fill: false
+    tiling: true
+    obstacles_allowed: false
+    description: "rover start zone; no obstacles by rule; markers on its 2 frame sides"
+  left_corridor:
+    rect: [0.0, 1.50, 2.0, 2.70]        # 2.0 x 1.2 m, DERIVED (not named in the rules)
+    color: [0.60, 0.60, 0.60, 1.0]
+    fill: false
+    tiling: true
+    obstacles_allowed: false
+    description: "ASSUMPTION: left column strip between construction and start zones"
+  construction:
+    rect: [0.0, 0.00, 2.0, 1.50]        # 2.0 x 1.5 m, BOTTOM-LEFT (south-west)
+    color: [0.16, 0.45, 0.90, 1.0]
+    fill: false
+    tiling: true
+    obstacles_allowed: false
+    description: "berm construction zone (south-west)"
+  obstacle:
+    rect: [2.0, 0.00, 7.5, 5.00]        # 5.5 m wide middle band, full height
+    color: [0.95, 0.80, 0.15, 1.0]
+    fill: false
+    tiling: true
+    obstacles_allowed: true
+    description: "middle 5.5 m obstacle zone; seeded boulders + craters"
+  excavation:
+    rect: [7.5, 0.00, 9.0, 5.00]        # 1.5 x 5.0 m EAST strip
+    color: [0.95, 0.45, 0.10, 1.0]
+    fill: false
+    tiling: true
+    obstacles_allowed: true
+    description: "east excavation zone; boulders (but not craters) may be here"
+  berm_target:
+    rect: [0.375, 0.30, 1.625, 1.20]    # 1.25 x 0.9 m inside the construction zone
+    color: [0.10, 0.85, 0.85, 1.0]
+    fill: true
+    tiling: false
+    obstacles_allowed: false
+    description: "berm target footprint inside the construction zone"
+
+# Painted zone boundary lines (visual only).
+marking:
+  width: 0.04            # m, line width
+  thickness: 0.002       # m
+  z: 0.004               # m, hover above the sand to avoid z-fighting
+  berm_height: 0.15      # m, ASSUMPTION for the judged berm height (used by module 6)
+
+boulders:
+  count: {min: 3, max: 6}          # competition: at least 3 boulders; demo runs may scatter up to 6
+  diameter: {min: 0.30, max: 0.40} # competition rule: 30-40 cm diameter
+  exposed_fraction: {min: 0.45, max: 1.0}  # visible height = fraction * diameter
+  spacing: 0.40                    # increased spacing
+  margin: 0.40                     # increased margin from zone borders
+  zones: [obstacle, excavation]    # boulders may be in the excavation zone too
+  zone_weights: {obstacle: 1.0, excavation: 0.25}
+  color: [0.42, 0.40, 0.38, 1.0]
+  static: true                     # rule: the rover must not move obstacles
+
+craters:
+  count: {min: 3, max: 7}          # competition: at least 3; demo runs may add more
+  width: {min: 0.25, max: 0.45}    # slightly smaller max width for better navigation
+  depth: {min: 0.06, max: 0.15}    # m, NEGATIVE (depression) - reduced max depth
+  spacing: 0.40                    # increased spacing for better distribution
+  margin: 0.50                     # increased margin from zone borders
+  zones: [obstacle]                # craters only in the obstacle zone
+  zone_weights: {obstacle: 1.0}
+
+# -----------------------------------------------------------------------------
+# Arena fiducials.  Rules: only on the start-zone frame (2 sides) + 1 wall
+# marker, <= 60 cm high, <= 25x25 cm, <= 5 total.
+# cat_arena places the physical BOARDS and exports their exact ground-truth
+# poses (markers.yaml).  The AprilTag bitmaps + detection arrive in module 4.
+# -----------------------------------------------------------------------------
+markers:
+  enabled: true
+  family: tag36h11
+  max_count: 5
+  board_size: 0.25         # m (<= 0.25 required)
+  tag_size: 0.18           # m, inner tag area of the board
+  board_thickness: 0.01
+  center_height: 0.40      # m, board centre above the sand (top edge = 0.525 m <= 0.60)
+  stand_off: 0.012         # m, gap between wall inner face and board back
+  board_color: [0.92, 0.92, 0.92, 1.0]
+  tag_color: [0.06, 0.06, 0.06, 1.0]
+  placements:
+    - id: 0
+      mount: north_wall          # start-zone frame side 1
+      position: [1.00, 5.00]     # point on the wall plane (arena frame)
+      note: "north wall, inside the start zone"
+    - id: 1
+      mount: west_wall           # start-zone frame side 2
+      position: [0.00, 3.85]
+      note: "west wall, inside the start zone"
+    - id: 2
+      mount: north_wall          # the single allowed extra wall marker
+      position: [6.00, 5.00]
+      note: "mid-arena north wall, visible during traverse/return"
+
+# -----------------------------------------------------------------------------
+# Rover spawn.  Footprint must equal the module-2 stowed envelope
+# (1.5 x 0.75 m is competition ground truth).  Used only to guarantee the
+# randomly sampled pose fits inside the start zone.
+# -----------------------------------------------------------------------------
+start_pose:
+  robot_footprint: {length: 1.50, width: 0.75}
+  margin: 0.05                 # m, keep-out from the start-zone border
+  yaw_mode: random             # random | fixed
+  yaw_deg: 0.0                 # used only when yaw_mode == fixed
+  declared_forward_deg: 0.0    # body +x axis is declared "forward" (team decision)
+  max_tries: 200000
+  seed_namespace: start_pose
+
+# Spawn height above the sand surface (module 2 refines with wheel radius).
+spawn:
+  z: 0.08
+
+# Optional top-down verification camera baked into the world.  Off by default:
+# an always-on camera sensor costs render time in every simulation run.
+overview_camera:
+  enabled: false
+  topic: /arena_overview/image
+  width: 1280
+  height: 720
+  format: R8G8B8
+  update_rate: 2.0
+  hfov_deg: 62.0
+  position: [5.05, -2.40, 7.20]   # arena frame
+  look_at: [4.50, 2.50, 0.00]
+
+# -----------------------------------------------------------------------------
+# Scene rendering settings (visual only; no physics effect).
+# Defaults reproduce the original hard-coded values exactly, so an arena.yaml
+# without these sections generates a byte-identical world.  Module 3 writes
+# per-scene overrides here to randomize lighting / sand / shadows.
+# -----------------------------------------------------------------------------
+scene:
+  ambient: [0.55, 0.55, 0.55, 1.0]
+  background: [0.72, 0.80, 0.90, 1.0]
+  shadows: true
+  grid: false
+  origin_visual: false
+
+# Directional sun.  ``direction`` is the light travel direction (points from the
+# sun toward the scene); it must be non-zero.
+light:
+  name: sun
+  cast_shadows: true
+  pose: [0.0, 0.0, 12.0, 0.0, 0.0, 0.0]
+  diffuse: [0.92, 0.90, 0.86, 1.0]
+  specular: [0.25, 0.25, 0.25, 1.0]
+  direction: [-0.45, 0.35, -0.82]
+  attenuation: [1000.0, 0.9, 0.01, 0.001]   # range, constant, linear, quadratic

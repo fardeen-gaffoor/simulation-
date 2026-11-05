@@ -22,7 +22,7 @@ from .config import ArenaConfig, Rect
 from .markers import marker_poses
 from .obstacles import ObstacleLayout
 from .start_pose import StartPose
-from .terrain import TerrainMesh
+from .terrain import Crater
 
 __all__ = ["build_ground_truth", "write_ground_truth", "GROUND_TRUTH_HEADER"]
 
@@ -62,7 +62,7 @@ def build_ground_truth(
     cfg: ArenaConfig,
     seed: int,
     layout: ObstacleLayout,
-    mesh: TerrainMesh,
+    mesh,  # Heightmap mock object
     terrain_stats: Dict[str, Any],
     start_pose: StartPose,
     files: Dict[str, Any],
@@ -87,7 +87,8 @@ def build_ground_truth(
     crater_crossings = [
         c["id"] for c in craters if start_zone.intersects(_footprint(c["center"], c["radius"]))
     ]
-    albedo = terrain_stats.get("albedo") if isinstance(terrain_stats.get("albedo"), dict) else None
+    albedo = terrain_stats.get("diffuse") if isinstance(terrain_stats.get("diffuse"), dict) else None
+    normal_map = terrain_stats.get("normal") if isinstance(terrain_stats.get("normal"), dict) else None
     heightmap = terrain_stats.get("heightmap") if isinstance(terrain_stats.get("heightmap"), dict) else None
 
     rules = {
@@ -144,20 +145,17 @@ def build_ground_truth(
         },
         "zones": _zone_dict(cfg),
         "terrain": {
-            "cell_size": cfg.terrain.cell_size,
-            "grid": terrain_stats.get("grid"),
-            "cell_size_actual": terrain_stats.get("cell_size"),
-            "triangles": terrain_stats.get("triangles"),
-            "vertices": terrain_stats.get("vertices"),
+            "use_heightmap": cfg.terrain.use_heightmap,
+            "heightmap_resolution": cfg.terrain.heightmap_resolution,
+            "max_relief": cfg.terrain.max_relief,
+            "heightmap_size": [terrain_stats.get("rows"), terrain_stats.get("cols")],
             "z_min": terrain_stats.get("z_min"),
             "z_max": terrain_stats.get("z_max"),
             "skirt_depth": round(mesh.skirt_depth, 6),
-            "noise_amplitude": cfg.terrain.noise_amplitude,
             "files": {
-                "mesh": terrain_stats.get("obj"),
-                "mesh_mtl": terrain_stats.get("mtl"),
-                "albedo": albedo.get("file") if albedo else None,
                 "heightmap": heightmap.get("file") if heightmap else None,
+                "albedo": albedo.get("file") if albedo else None,
+                "normal": normal_map.get("file") if normal_map else None,
             },
             "heightmap_encoding": heightmap,
         },

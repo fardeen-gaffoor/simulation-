@@ -25,6 +25,7 @@ install(PROGRAMS
   scripts/generate_arena.py
   scripts/publish_start_pose.py
   scripts/render_overview.py
+  scripts/spawn_robot.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

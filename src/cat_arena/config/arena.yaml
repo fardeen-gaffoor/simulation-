@@ -62,13 +62,19 @@ physics:
   gravity: [0.0, 0.0, -9.8]
 
 terrain:
-  cell_size: 0.05        # m, mesh grid resolution (0.05 -> 181x101 = 36k triangles)
-  skirt: true            # add vertical skirt + lid-less side walls of sand_depth
-  noise_amplitude: 0.0   # m, long-wavelength sand ripple amplitude (0 for clean drive tests)
-  noise_wavelength: 3.0  # m
-  albedo_texture: true   # generate a procedural sand albedo texture (visual only)
-  texture_size: 512      # px
-  heightmap_png: true    # also emit a heightfield PNG artifact (tools/labels only)
+  # Heightmap terrain (replaces triangle mesh)
+  use_heightmap: true
+  heightmap_png: "height.png"      # generated heightmap file (257x257, 8-bit grayscale)
+  heightmap_resolution: 0.05       # m, heightmap grid resolution
+  max_relief: 0.4                  # m, max height variation from base
+  skirt: true                      # add vertical skirt at edges
+  sand_depth: 0.30                 # m, skirt depth (reuses arena.sand_depth)
+  albedo_texture: true             # use procedural sand texture
+  texture_size: 1024               # px
+  normal_map: false                # disable normal map (OGRE2 shader bug)
+  friction:
+    mu: 0.9
+    mu2: 0.9
 
 # -----------------------------------------------------------------------------
 # Zones. rect = [x0, y0, x1, y1] in the arena frame.
@@ -128,8 +134,8 @@ marking:
   berm_height: 0.15      # m, ASSUMPTION for the judged berm height (used by module 6)
 
 boulders:
-  count: {min: 3, max: 4}          # competition: at least 3 boulders
-  diameter: {min: 0.25, max: 0.35} # slightly smaller
+  count: {min: 3, max: 6}          # competition: at least 3 boulders; demo runs may scatter up to 6
+  diameter: {min: 0.30, max: 0.40} # competition rule: 30-40 cm diameter
   exposed_fraction: {min: 0.45, max: 1.0}  # visible height = fraction * diameter
   spacing: 0.40                    # increased spacing
   margin: 0.40                     # increased margin from zone borders
@@ -139,7 +145,7 @@ boulders:
   static: true                     # rule: the rover must not move obstacles
 
 craters:
-  count: {min: 3, max: 5}          # competition: at least 3
+  count: {min: 3, max: 7}          # competition: at least 3; demo runs may add more
   width: {min: 0.25, max: 0.45}    # slightly smaller max width for better navigation
   depth: {min: 0.06, max: 0.15}    # m, NEGATIVE (depression) - reduced max depth
   spacing: 0.40                    # increased spacing for better distribution

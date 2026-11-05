@@ -180,11 +180,14 @@ def _launch_setup(context, *args, **kwargs):
                 )
             )
         else:
+            # ``spawn_robot.py`` retries the create service until the world
+            # has finished loading; ``ros_gz_sim create`` gives up after 5 s
+            # and leaves the arena without a robot on slow machines.
             spawn_cmd = [
                 "ros2",
                 "run",
-                "ros_gz_sim",
-                "create",
+                "cat_arena",
+                "spawn_robot.py",
                 "-world",
                 world_name,
                 "-file",
@@ -203,8 +206,8 @@ def _launch_setup(context, *args, **kwargs):
                 "0.0",
                 "-Y",
                 f"{start_pose.yaw:.6f}",
-                "-allow_renaming",
-                "false",
+                "-timeout",
+                "120.0",
             ]
             actions.append(
                 LogInfo(

@@ -49,7 +49,10 @@ __all__ = [
     "encode_command",
     "decode_status",
     "GzBermVisual",
+    "GzParticles",
     "berm_sdf",
+    "particle_emitter_topic",
+    "particle_command_request",
 ]
 
 
@@ -385,3 +388,74 @@ class GzBermVisual:
         if self.spawned:
             self._run(self._service("remove", "gz.msgs.Entity", "gz.msgs.Boolean", f'name: "{self.config.gz_model}"'))
             self.spawned = False
+
+
+# --------------------------------------------------------------------------- #
+# particle emitters (digging dust / falling sand)
+# --------------------------------------------------------------------------- #
+def particle_emitter_topic(model: str, link: str, emitter: str) -> str:
+    """The gz cmd topic of one particle emitter inside a spawned model."""
+    return f"/model/{model}/link/{link}/particle_emitter/{emitter}/cmd"
+
+
+def particle_command_request(emitting: bool) -> str:
+    """A ``gz.msgs.ParticleEmitter`` text-format request that only sets the flag."""
+    return "emitting: {data: %s}" % ("true" if emitting else "false")
+
+
+class GzParticles:
+    """Toggle the rover's dig/dump particle emitters over their gz cmd topics.
+
+    The emitters themselves are SDF in the robot (see ``rover.urdf.xacro``), so
+    the only run-time state is on/off.  Commands are sent only when the desired
+    state changes, and a failure disables the effect instead of failing the
+    mechanism.  The runner is injected for the same reason as
+    :class:`GzBermVisual`'s: it keeps this testable without Gazebo.
+    """
+
+    def __init__(
+        self,
+        model: str,
+        emitters: Tuple[Tuple[str, str], ...],
+        run: Callable[[list], int],
+    ) -> None:
+        self.model = str(model)
+        self.emitters = tuple(emitters)
+        self._run = run
+        self.enabled = True
+        self.note = ""
+        self._state = [False for _ in self.emitters]
+
+    def _command(self, index: int, emitting: bool) -> list:
+        link, emitter = self.emitters[index]
+        return [
+            "gz",
+            "topic",
+            "-t",
+            particle_emitter_topic(self.model, link, emitter),
+            "-m",
+            "gz.msgs.ParticleEmitter",
+            "-p",
+            particle_command_request(emitting),
+        ]
+
+    def set_all(self, wanted) -> bool:
+        """Set every emitter from ``wanted`` (one bool per emitter)."""
+        if not self.enabled:
+            return False
+        spoke = False
+        for index, emitting in enumerate(wanted):
+            emitting = bool(emitting)
+            if self._state[index] == emitting:
+                continue
+            if self._run(self._command(index, emitting)) != 0:
+                self.enabled = False
+                self.note = "gz topic publish failed; particle effects are off"
+                return False
+            self._state[index] = emitting
+            spoke = True
+        return spoke
+
+    def stop(self) -> None:
+        if self.enabled:
+            self.set_all([False for _ in self.emitters])

@@ -1,19 +1,7 @@
-"""Terrain height field, triangle-mesh export and texture generation.
+"""Terrain height field and heightmap generation for Gazebo.
 
-The arena sand is a *real* triangle mesh:
-
-* craters are baked into the geometry as smooth NEGATIVE depressions,
-* the mesh is exported as OBJ **with vertex normals** - this is mandatory:
-  Gazebo's dartsim ``CustomMeshShape`` reports
-  "does not have a normal count [0] that matches its vertex count" and then
-  segfaults when a sub-mesh has no normals (verified on gz-sim 8.15.0),
-* the same mesh is used for the visual *and* for the collision geometry, so what
-  the rover drives on is exactly what the cameras see,
-* an optional skirt turns the open sheet into a sand layer with vertical sides.
-
-Collision uses the DART bullet collision detector (verified).  The heightmap
-collision path was tried first and rejected: on this build it silently produced
-a flat surface, see README "verified facts".
+The arena sand uses a Gazebo <heightmap> for both collision and visual.
+This replaces the old triangle mesh approach.
 """
 
 from __future__ import annotations
@@ -24,6 +12,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+from PIL import Image
 
 from .config import ArenaConfig
 from .png import write_gray8, write_rgb8
@@ -31,17 +20,15 @@ from .png import write_gray8, write_rgb8
 __all__ = [
     "Crater",
     "TerrainField",
-    "TerrainMesh",
-    "build_mesh",
-    "write_obj_mesh",
+    "build_heightmap",
     "write_heightmap_png",
-    "write_sand_albedo",
+    "write_sand_textures",
 ]
 
 
 @dataclass(frozen=True)
 class Crater:
-    """A seeded crater: a negative depression baked into the terrain mesh."""
+    """A seeded crater: a negative depression in the heightmap."""
 
     crater_id: str
     x: float
@@ -70,6 +57,11 @@ def _bowl(t: float) -> float:
     return 0.5 * (1.0 + math.cos(math.pi * t))
 
 
+def _bowl_vec(t: np.ndarray) -> np.ndarray:
+    """Vectorized bowl profile."""
+    return 0.5 * (1.0 + np.cos(np.pi * t))
+
+
 class TerrainField:
     """Analytic sand height field ``z = h(x, y)`` in the arena frame.
 
@@ -87,8 +79,8 @@ class TerrainField:
     ):
         self._cfg = cfg
         self._craters = list(craters)
-        self._amp = float(cfg.terrain.noise_amplitude)
-        self._wavelength = float(cfg.terrain.noise_wavelength)
+        self._amp = float(cfg.terrain.noise_amplitude) if hasattr(cfg.terrain, 'noise_amplitude') else 0.0
+        self._wavelength = float(cfg.terrain.noise_wavelength) if hasattr(cfg.terrain, 'noise_wavelength') else 3.0
         self._phases = tuple(float(p) for p in (phases if phases is not None else (0.0, 0.0, 0.0)))
 
     @property
@@ -142,228 +134,171 @@ class TerrainField:
         return self._amp if self._amp > 0.0 else 0.0
 
 
-class TerrainMesh:
-    """Generated terrain grid plus the metadata needed to describe it."""
+def _value_noise_2d(shape: Tuple[int, int], rng: np.random.Generator, frequency: float = 1.0) -> np.ndarray:
+    """Generate simple value noise at given frequency."""
+    ny, nx = shape
+    grid_x = max(2, int(nx / frequency))
+    grid_y = max(2, int(ny / frequency))
+    grid = rng.normal(0, 1, (grid_y, grid_x)).astype(np.float32)
 
-    __slots__ = ("xs", "ys", "z", "skirt_depth", "cell_x", "cell_y", "triangle_count", "vertex_count")
+    x_indices = np.linspace(0, grid_x - 1, nx)
+    y_indices = np.linspace(0, grid_y - 1, ny)
 
-    def __init__(
-        self,
-        xs: np.ndarray,
-        ys: np.ndarray,
-        z: np.ndarray,
-        skirt_depth: float,
-        triangle_count: int,
-        vertex_count: int,
-    ):
-        self.xs = xs
-        self.ys = ys
-        self.z = z
-        self.skirt_depth = skirt_depth
-        self.cell_x = float(xs[1] - xs[0])
-        self.cell_y = float(ys[1] - ys[0])
-        self.triangle_count = triangle_count
-        self.vertex_count = vertex_count
+    x0 = np.floor(x_indices).astype(int)
+    x1 = np.minimum(x0 + 1, grid_x - 1)
+    y0 = np.floor(y_indices).astype(int)
+    y1 = np.minimum(y0 + 1, grid_y - 1)
 
-    @property
-    def z_min(self) -> float:
-        return float(self.z.min())
+    wx = x_indices - x0
+    wy = y_indices - y0
 
-    @property
-    def z_max(self) -> float:
-        return float(self.z.max())
+    c00 = grid[y0[:, None], x0[None, :]]
+    c10 = grid[y0[:, None], x1[None, :]]
+    c01 = grid[y1[:, None], x0[None, :]]
+    c11 = grid[y1[:, None], x1[None, :]]
+
+    wx = wx[None, :]
+    wy = wy[:, None]
+
+    return (1 - wx) * (1 - wy) * c00 + wx * (1 - wy) * c10 + (1 - wx) * wy * c01 + wx * wy * c11
 
 
-def build_mesh(cfg: ArenaConfig, field: TerrainField) -> TerrainMesh:
-    """Sample the height field on the arena grid (the grid used everywhere else)."""
-    cell = float(cfg.terrain.cell_size)
-    nx = int(round(cfg.length_x / cell)) + 1
-    ny = int(round(cfg.width_y / cell)) + 1
-    xs = np.linspace(0.0, cfg.length_x, nx)
-    ys = np.linspace(0.0, cfg.width_y, ny)
-    z = field.height_grid(xs, ys)
-    tris = 2 * (nx - 1) * (ny - 1)
-    verts = nx * ny
-    if cfg.terrain.skirt:
-        tris += 2 * (2 * (nx - 1) + 2 * (ny - 1))
-        verts += 2 * (2 * nx + 2 * ny)
-    return TerrainMesh(
-        xs=xs,
-        ys=ys,
-        z=z,
-        skirt_depth=float(cfg.sand_depth) if cfg.terrain.skirt else 0.0,
-        triangle_count=tris,
-        vertex_count=verts,
-    )
+def _multi_scale_noise(nx: int, ny: int, rng: np.random.Generator, octaves: int = 5, persistence: float = 0.5, lacunarity: float = 2.0) -> np.ndarray:
+    """Generate multi-scale noise by summing value noise at different frequencies."""
+    result = np.zeros((ny, nx), dtype=np.float32)
+    amplitude = 1.0
+    frequency = 1.0
+
+    for _ in range(octaves):
+        noise = _value_noise_2d((ny, nx), rng, frequency)
+        result += amplitude * noise
+        amplitude *= persistence
+        frequency *= lacunarity
+
+    result = (result - result.min()) / (result.max() - result.min() + 1e-8)
+    return result
 
 
-def _grid_normals(xs: np.ndarray, ys: np.ndarray, z: np.ndarray) -> np.ndarray:
-    """Per-vertex normals of the top surface (central differences)."""
-    dz_dy, dz_dx = np.gradient(z, ys, xs)
-    nx = -dz_dx
-    ny = -dz_dy
-    nz = np.ones_like(z)
-    norm = np.sqrt(nx * nx + ny * ny + nz * nz)
-    return np.stack([nx / norm, ny / norm, nz / norm], axis=-1)
+def _make_flat_mask(nx: int, ny: int, arena_size_x: float, arena_size_y: float, flat_zones: List[Tuple[float, float, float, float]]) -> np.ndarray:
+    """Create boolean mask for flat zones (True = flat)."""
+    flat_mask = np.zeros((ny, nx), dtype=bool)
+    x_coords = np.linspace(0, arena_size_x, nx)
+    y_coords = np.linspace(0, arena_size_y, ny)
+
+    for (x0, y0, x1, y1) in flat_zones:
+        x_mask = (x_coords >= x0) & (x_coords <= x1)
+        y_mask = (y_coords >= y0) & (y_coords <= y1)
+        flat_mask = flat_mask | (x_mask[np.newaxis, :] & y_mask[:, np.newaxis])
+
+    return flat_mask
 
 
-class _ObjBuilder:
-    """Tiny OBJ accumulator that keeps the v/vt/vn index spaces aligned."""
-
-    def __init__(self) -> None:
-        self.verts: List[Tuple[float, float, float]] = []
-        self.uvs: List[Tuple[float, float]] = []
-        self.norms: List[Tuple[float, float, float]] = []
-        self.faces: List[str] = []
-
-    def add_vertex(self, pos: Sequence[float], normal: Sequence[float], uv: Optional[Sequence[float]]) -> int:
-        self.verts.append((float(pos[0]), float(pos[1]), float(pos[2])))
-        self.norms.append((float(normal[0]), float(normal[1]), float(normal[2])))
-        self.uvs.append((float(uv[0]), float(uv[1])) if uv is not None else (0.0, 0.0))
-        return len(self.verts)  # 1-based OBJ index
-
-    def _normal_of(self, ia: int, ib: int, ic: int) -> np.ndarray:
-        pa = np.array(self.verts[ia - 1])
-        pb = np.array(self.verts[ib - 1])
-        pc = np.array(self.verts[ic - 1])
-        return np.cross(pb - pa, pc - pa)
-
-    def add_triangle(self, ia: int, ib: int, ic: int, outward: Sequence[float]) -> None:
-        """Add a triangle, auto-correcting the winding to face ``outward``."""
-        out = np.asarray(outward, dtype=float)
-        if float(np.dot(self._normal_of(ia, ib, ic), out)) < 0.0:
-            ib, ic = ic, ib
-        self.faces.append(f"f {ia}/{ia}/{ia} {ib}/{ib}/{ib} {ic}/{ic}/{ic}")
-
-    def add_quad(self, i0: int, i1: int, i2: int, i3: int, outward: Sequence[float]) -> None:
-        self.add_triangle(i0, i1, i2, outward)
-        self.add_triangle(i0, i2, i3, outward)
-
-    def render(self) -> str:
-        lines = [f"v {v[0]:.5f} {v[1]:.5f} {v[2]:.6f}" for v in self.verts]
-        lines += [f"vt {uv[0]:.6f} {uv[1]:.6f}" for uv in self.uvs]
-        lines += [f"vn {n[0]:.6f} {n[1]:.6f} {n[2]:.6f}" for n in self.norms]
-        lines += self.faces
-        return "\n".join(lines) + "\n"
-
-
-def write_obj_mesh(
-    obj_path: str,
+def build_heightmap(
     cfg: ArenaConfig,
-    mesh: TerrainMesh,
-    mtl_filename: str = "terrain.mtl",
-    material_top: str = "sand",
-    material_side: str = "sand_side",
-) -> Dict[str, object]:
-    """Write the terrain as an OBJ (with ``vn``/``vt``) plus its MTL file."""
-    xs, ys, z = mesh.xs, mesh.ys, mesh.z
-    nx, ny = int(xs.size), int(ys.size)
-    normals = _grid_normals(xs, ys, z)
-    builder = _ObjBuilder()
+    craters: Sequence[Crater],
+    seed: int = 42,
+    flat_zones: Optional[List[Tuple[float, float, float, float]]] = None,
+) -> np.ndarray:
+    """Build heightmap array in meters (0 = base, max_relief = max height).
 
-    header = [
-        "# cat_arena terrain mesh - generated file, do not edit",
-        f"# grid {nx} x {ny}, cell {mesh.cell_x:.4f} x {mesh.cell_y:.4f} m, skirt {mesh.skirt_depth:.3f} m",
-        f"mtllib {mtl_filename}",
-        "o terrain_top",
-        f"usemtl {material_top}",
-    ]
-
-    # ---- top surface -------------------------------------------------------
-    top_index = np.zeros((ny, nx), dtype=int)
-    for j in range(ny):
-        for i in range(nx):
-            top_index[j, i] = builder.add_vertex(
-                (xs[i], ys[j], z[j, i]),
-                normals[j, i],
-                (xs[i] / cfg.length_x, ys[j] / cfg.width_y),
-            )
-    up = (0.0, 0.0, 1.0)
-    for j in range(ny - 1):
-        for i in range(nx - 1):
-            builder.add_quad(
-                int(top_index[j, i]),
-                int(top_index[j, i + 1]),
-                int(top_index[j + 1, i + 1]),
-                int(top_index[j + 1, i]),
-                up,
-            )
-
-    # ---- skirt (vertical sand sides down to -sand_depth) -------------------
-    if mesh.skirt_depth > 0.0:
-        depth = mesh.skirt_depth
-        bottom = z - depth
-        header.append("o terrain_skirt")
-        header.append(f"usemtl {material_side}")
-        borders = (
-            ("south", (0.0, -1.0, 0.0), [(xs[i], ys[0], z[0, i], bottom[0, i]) for i in range(nx)]),
-            ("north", (0.0, 1.0, 0.0), [(xs[i], ys[-1], z[-1, i], bottom[-1, i]) for i in range(nx)]),
-            ("west", (-1.0, 0.0, 0.0), [(xs[0], ys[j], z[j, 0], bottom[j, 0]) for j in range(ny)]),
-            ("east", (1.0, 0.0, 0.0), [(xs[-1], ys[j], z[j, -1], bottom[j, -1]) for j in range(ny)]),
-        )
-        for _name, outward, samples in borders:
-            bottom_idx: List[int] = []
-            top_idx: List[int] = []
-            for (x, y, z_top, z_bot) in samples:
-                bottom_idx.append(builder.add_vertex((x, y, z_bot), outward, None))
-                top_idx.append(builder.add_vertex((x, y, z_top), outward, None))
-            for k in range(len(samples) - 1):
-                builder.add_quad(
-                    bottom_idx[k], bottom_idx[k + 1], top_idx[k + 1], top_idx[k], outward
-                )
-
-    with open(obj_path, "w", encoding="utf-8") as handle:
-        handle.write("\n".join(header) + "\n")
-        handle.write(builder.render())
-
-    # ---- material library --------------------------------------------------
-    r, g, b = cfg.sand_color[:3]
-    side = tuple(max(0.0, c * 0.72) for c in (r, g, b))
-    mtl_path = os.path.join(os.path.dirname(obj_path), mtl_filename)
-    with open(mtl_path, "w", encoding="utf-8") as handle:
-        handle.write(
-            "# cat_arena terrain materials - generated file, do not edit\n"
-            f"newmtl {material_top}\n"
-            f"Ka {r * 0.25:.4f} {g * 0.25:.4f} {b * 0.25:.4f}\n"
-            f"Kd {r:.4f} {g:.4f} {b:.4f}\n"
-            "Ks 0.05 0.05 0.05\nNs 8.0\n\n"
-            f"newmtl {material_side}\n"
-            f"Ka {side[0] * 0.25:.4f} {side[1] * 0.25:.4f} {side[2] * 0.25:.4f}\n"
-            f"Kd {side[0]:.4f} {side[1]:.4f} {side[2]:.4f}\n"
-            "Ks 0.02 0.02 0.02\nNs 4.0\n"
-        )
-
-    return {
-        "obj": os.path.basename(obj_path),
-        "mtl": mtl_filename,
-        "grid": [nx, ny],
-        "cell_size": [round(mesh.cell_x, 6), round(mesh.cell_y, 6)],
-        "triangles": int(mesh.triangle_count),
-        "vertices": int(mesh.vertex_count),
-        "z_min": round(mesh.z_min, 6),
-        "z_max": round(mesh.z_max, 6),
-    }
-
-
-def write_heightmap_png(path: str, mesh: TerrainMesh, z_min: float, z_max: float) -> Dict[str, object]:
-    """Write an 8-bit heightfield PNG artifact plus its encoding metadata.
-
-    This PNG is *not* loaded by the simulation (the mesh drives collision).  It
-    exists for analysis, quick inspection and later-module ground truth.
+    Gazebo heightmaps must be square (2^n+1 x 2^n+1). We use the larger dimension.
     """
+    rng = np.random.default_rng(seed)
+
+    nx = int(round(cfg.length_x / cfg.terrain.heightmap_resolution)) + 1
+    ny = int(round(cfg.width_y / cfg.terrain.heightmap_resolution)) + 1
+
+    # Ensure 2^n + 1 for heightmap compatibility (Gazebo requirement - MUST BE SQUARE)
+    def next_pow2_plus1(n):
+        p = 1
+        while p + 1 < n:
+            p <<= 1
+        return p + 1
+
+    # Use the same size for both dimensions (square heightmap required by Gazebo)
+    n = max(nx, ny)
+    n = next_pow2_plus1(n)
+    nx = ny = n
+
+    max_relief = cfg.terrain.max_relief
+
+    # Generate base dune noise
+    noise = _multi_scale_noise(nx, ny, rng, octaves=5)
+    height = noise * max_relief
+
+    # Add craters (negative depressions)
+    for crater in craters:
+        radius_m = crater.radius
+        depth_m = crater.depth
+
+        cx_m = crater.x
+        cy_m = crater.y
+
+        # Check if center falls in flat zone
+        in_flat_zone = False
+        if flat_zones:
+            for (x0, y0, x1, y1) in flat_zones:
+                if x0 - radius_m - 0.1 <= cx_m <= x1 + radius_m + 0.1 and \
+                   y0 - radius_m - 0.1 <= cy_m <= y1 + radius_m + 0.1:
+                    in_flat_zone = True
+                    break
+
+        if in_flat_zone:
+            continue
+
+        # Convert to pixel coordinates
+        cx_px = cx_m / cfg.length_x * (nx - 1)
+        cy_px = cy_m / cfg.width_y * (ny - 1)
+        radius_px = radius_m / cfg.length_x * (nx - 1)
+
+        # Create crater mask
+        y_grid, x_grid = np.ogrid[:ny, :nx]
+        dist = np.sqrt((x_grid - cx_px) ** 2 + (y_grid - cy_px) ** 2)
+
+        mask = dist < radius_px
+        if not np.any(mask):
+            continue
+
+        t = np.where(mask, dist / radius_px, 1.0)
+        profile = np.where(mask, _bowl_vec(t), 0.0)
+
+        # Subtract crater (negative height)
+        height = np.where(mask, height - depth_m * profile, height)
+
+    # Apply flat zones mask
+    if flat_zones:
+        flat_mask = _make_flat_mask(nx, ny, cfg.length_x, cfg.width_y, flat_zones)
+        height = np.where(flat_mask, 0.0, height)
+
+    # Ensure non-negative (Gazebo heightmaps expect 0 to max)
+    height = np.maximum(height, 0.0)
+
+    return height
+
+
+def write_heightmap_png(path: str, height_m: np.ndarray, z_min: float = 0.0, z_max: float = 0.4) -> Dict[str, object]:
+    """Write an 8-bit heightfield PNG for Gazebo heightmap."""
     if z_max <= z_min:
         z_max = z_min + 1e-6
-    scaled = (mesh.z - z_min) / (z_max - z_min)
-    encoded = np.clip(np.round(scaled * 255.0), 0, 255).astype(np.uint8)
-    write_gray8(path, np.flipud(encoded))
+
+    # Normalize to 0-255
+    height_norm = (height_m - z_min) / (z_max - z_min)
+    height_norm = np.clip(height_norm, 0.0, 1.0)
+    height_uint8 = (height_norm * 255).astype(np.uint8)
+
+    # Flip vertically because image origin is top-left, arena origin is bottom-left
+    height_uint8 = np.flipud(height_uint8)
+
+    write_gray8(path, height_uint8)
+
     return {
         "file": os.path.basename(path),
         "z_min": round(float(z_min), 6),
         "z_max": round(float(z_max), 6),
         "quantization_m": round(float((z_max - z_min) / 255.0), 8),
-        "rows": int(mesh.ys.size),
-        "cols": int(mesh.xs.size),
-        "note": "row 0 = north edge (y = width_y); analysis artifact only, never loaded by gz",
+        "rows": int(height_m.shape[0]),
+        "cols": int(height_m.shape[1]),
+        "note": "row 0 = north edge (y = width_y); used by Gazebo heightmap",
     }
 
 
@@ -380,17 +315,59 @@ def _blur(image: np.ndarray, passes: int = 1) -> np.ndarray:
     return out
 
 
-def write_sand_albedo(path: str, cfg: ArenaConfig, rng: np.random.Generator) -> Dict[str, object]:
-    """Generate a procedural dry-sand albedo texture (RGB8 PNG, visual only)."""
+def write_sand_textures(
+    diffuse_path: str,
+    normal_path: Optional[str],
+    cfg: ArenaConfig,
+    rng: np.random.Generator,
+) -> Dict[str, object]:
+    """Generate procedural sand diffuse and normal map textures."""
     size = int(cfg.terrain.texture_size)
     base = np.array(cfg.sand_color[:3], dtype=float) * 255.0
+
+    # Diffuse texture
     coarse = _blur(rng.normal(0.0, 1.0, (size, size)), passes=6)
     coarse /= max(1e-6, float(np.abs(coarse).max()))
     grain = _blur(rng.normal(0.0, 1.0, (size, size)), passes=1)
     grain /= max(1e-6, float(np.abs(grain).max()))
     modulation = 1.0 + 0.10 * coarse + 0.06 * grain
+
     img = np.empty((size, size, 3), dtype=np.uint8)
     for channel in range(3):
         img[:, :, channel] = np.clip(base[channel] * modulation, 0, 255).astype(np.uint8)
-    write_rgb8(path, img)
-    return {"file": os.path.basename(path), "size": [size, size], "type": "procedural_sand_albedo"}
+
+    write_rgb8(diffuse_path, img)
+
+    result = {"diffuse": {"file": os.path.basename(diffuse_path), "size": [size, size], "type": "procedural_sand_diffuse"}}
+
+    # Normal map
+    if normal_path and cfg.terrain.normal_map:
+        height_detail = _multi_scale_noise(size, size, rng, octaves=4, persistence=0.5)
+
+        # Compute gradients
+        dx = np.zeros((size, size), dtype=np.float32)
+        dx[:, 1:-1] = (height_detail[:, 2:] - height_detail[:, :-2]) * 0.5
+        dx[:, 0] = height_detail[:, 1] - height_detail[:, 0]
+        dx[:, -1] = height_detail[:, -1] - height_detail[:, -2]
+
+        dy = np.zeros((size, size), dtype=np.float32)
+        dy[1:-1, :] = (height_detail[2:, :] - height_detail[:-2, :]) * 0.5
+        dy[0, :] = height_detail[1, :] - height_detail[0, :]
+        dy[-1, :] = height_detail[-1, :] - height_detail[-2, :]
+
+        # Normal vector: (-dx, -dy, 1) normalized
+        norm = np.sqrt(dx * dx + dy * dy + 1.0)
+        nx = -dx / norm
+        ny = -dy / norm
+        nz = 1.0 / norm
+
+        # Convert to [0, 255] range for normal map (tangent space)
+        normal_map = np.empty((size, size, 3), dtype=np.uint8)
+        normal_map[:, :, 0] = ((nx + 1.0) * 0.5 * 255).astype(np.uint8)
+        normal_map[:, :, 1] = ((ny + 1.0) * 0.5 * 255).astype(np.uint8)
+        normal_map[:, :, 2] = ((nz + 1.0) * 0.5 * 255).astype(np.uint8)
+
+        write_rgb8(normal_path, normal_map)
+        result["normal"] = {"file": os.path.basename(normal_path), "size": [size, size], "type": "procedural_sand_normal"}
+
+    return result

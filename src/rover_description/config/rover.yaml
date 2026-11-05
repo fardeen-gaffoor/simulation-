@@ -62,14 +62,15 @@ drive:
   track: 0.60           # left<->right wheel CENTRE separation (y)
   wheelbase: 0.52       # front<->rear wheel CENTRE separation (x)
   wheel_mass: 3.0       # wheel + in-hub motor + gearbox, per corner
-  joint_damping: 0.05
-  joint_friction: 0.02
+  joint_damping: 0.60   # N*m*s/rad, lumped rolling resistance in dry sand
+  joint_friction: 0.05
   max_wheel_torque: 25.0
   max_wheel_velocity: 12.0
+  max_wheel_acceleration: 3.0   # m/s^2, smooths starts on soft ground
   wheel_color: [0.12, 0.12, 0.13, 1.0]
   hub_color: [0.65, 0.65, 0.68, 1.0]
-  wheel_mu: 1.0
-  wheel_mu2: 1.0
+  wheel_mu: 0.85        # sand: loose sand means slip under a pulling load
+  wheel_mu2: 0.85
 
 # -----------------------------------------------------------------------------
 # Excavation: ladder (chain+buckets) on a pitch joint, belt (conveyor roller),

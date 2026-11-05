@@ -194,7 +194,7 @@ def test_setup_generates_the_world_then_starts_gazebo(launch_module, tmp_path):
 
 def test_setup_spawns_the_robot_at_the_sampled_pose(launch_module, tmp_path, config_path):
     setup = _setup(launch_module, output_dir=str(tmp_path))
-    create = [c for c in setup.commands() if "ros_gz_sim" in c and "create" in c]
+    create = [c for c in setup.commands() if "spawn_robot.py" in c]
     assert len(create) == 1, "exactly one spawn command is expected"
     cmd = create[0]
 
@@ -235,7 +235,7 @@ def test_setup_publishes_the_start_pose_with_the_run_seed(launch_module, tmp_pat
 
 def test_spawn_can_be_disabled(launch_module, tmp_path):
     commands = _setup(launch_module, output_dir=str(tmp_path), spawn_robot="false").commands()
-    assert not [c for c in commands if "create" in c]
+    assert not [c for c in commands if "spawn_robot.py" in c]
 
 
 def test_pose_publication_can_be_disabled(launch_module, tmp_path):

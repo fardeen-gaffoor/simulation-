@@ -33,6 +33,8 @@
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>ros_gz_sim</exec_depend>
   <exec_depend>ros_gz_bridge</exec_depend>
+  <exec_depend>cat_arena</exec_depend>
+  <exec_depend>rover_excavation</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
 
   <test_depend>ament_cmake_pytest</test_depend>

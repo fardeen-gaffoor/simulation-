@@ -1,9 +1,12 @@
-"""``excavation``: the ``WorkCycle`` server, the mechanism loop and the berm.
+"""``excavation``: the ``WorkCycle`` server, manual dig/dump, the berm.
 
 Started by ``excavation.launch.py`` as ``rover_excavation_mechanism``.  It is the
 only rclpy process in module 6, and it is pure wiring:
 
 * it *serves* the ``WorkCycle`` action module 5 calls;
+* it accepts manual commands on ``/excavation/manual`` (``dig``/``dump``/
+  ``stop``/``reset``) so a human can run the mechanism from the teleop (``V``
+  digs, ``B`` dumps) without a mission sequencer;
 * it owns one :class:`~rover_excavation.mechanism.Mechanism`, one
   :class:`~rover_excavation.sand.Tub` and one
   :class:`~rover_excavation.sand.BermField`, i.e. the physical state of the
@@ -21,10 +24,13 @@ the rover should be: module 5 owns all three.
 
 from __future__ import annotations
 
+import math
 import subprocess
 import sys
 from typing import Any, Dict, Optional
 
+from geometry_msgs.msg import PoseWithCovarianceStamped
+from nav_msgs.msg import Odometry
 from rclpy.action import ActionServer, CancelResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
@@ -37,10 +43,10 @@ from rover_excavation_msgs.msg import BermStatus, MechanismStatus
 from rover_navigation_msgs.action import WorkCycle
 
 from .. import nodeutil
-from ..backend import GzBermVisual, MechanismIO, MechanismIOError, build_io
+from ..backend import GzBermVisual, GzParticles, MechanismIO, MechanismIOError, build_io
 from ..config import WORK_PHASES, ExcavationConfig
 from ..cycle import STAGE_DONE, WorkCycle as WorkCycleRunner
-from ..mechanism import Mechanism
+from ..mechanism import STATE_DIGGING, STATE_DUMPING, Mechanism
 from ..sand import BermField, Tub
 
 __all__ = ["ExcavationNode", "main", "add_arguments"]
@@ -54,6 +60,17 @@ _MAX_TICK_S = 0.5
 #: How often the berm marker is republished even when nothing has changed, so a
 #: late rviz still gets one.
 _MARKER_REFRESH_S = 2.0
+
+
+def _yaw_from_quaternion(x: float, y: float, z: float, w: float) -> float:
+    """Planar heading from a quaternion."""
+    siny_cosp = 2.0 * (w * z + x * y)
+    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+    return math.atan2(siny_cosp, cosy_cosp)
+
+
+def _wrap_angle(angle: float) -> float:
+    return math.atan2(math.sin(angle), math.cos(angle))
 
 
 class ExcavationNode(Node):
@@ -86,6 +103,17 @@ class ExcavationNode(Node):
         self.publish_marker = bool(
             nodeutil.declare(self, "publish_marker", self.config.visual.publish_marker, "publish the berm marker")
         )
+        # Manual work commands (V = dig, B = dump, N = stop in the teleop).
+        # The topic is a std_msgs/String: "dig"/"dump"/"stop"/"reset".
+        self.manual_topic = str(
+            nodeutil.declare(self, "manual_topic", "/excavation/manual", "manual dig/dump command topic")
+        )
+        self.odom_topic = str(nodeutil.declare(self, "odom_topic", "/odom", "wheel odometry topic"))
+        self.initial_pose_topic = str(
+            nodeutil.declare(
+                self, "initial_pose_topic", "/cat_arena/initial_pose", "latched world start pose topic"
+            )
+        )
 
         # -- state ---------------------------------------------------------- #
         self.mechanism = Mechanism(self.config.mechanism)
@@ -108,6 +136,16 @@ class ExcavationNode(Node):
         self._joint_mismatch_since: Optional[float] = None
         self._log = nodeutil.LogOnce(self, period_s=10.0)
 
+        # -- world pose for manual dumping ---------------------------------- #
+        # /odom starts at the spawn pose, so the world pose is the latched
+        # /cat_arena/initial_pose composed with the odometry since spawn.  It
+        # is only used to decide where a manually triggered dump lands; the
+        # mechanism itself never needs it.
+        self._init_pose: Optional[tuple] = None
+        self._odom_pose = (0.0, 0.0, 0.0)
+        self._have_odom = False
+        self._manual_log_age = 0.0
+
         # -- publications --------------------------------------------------- #
         topics = self.config.topics
         self.status_publisher = self.create_publisher(MechanismStatus, topics.status, 10)
@@ -125,6 +163,18 @@ class ExcavationNode(Node):
         )
         self.joint_subscription = self.create_subscription(
             JointState, self.config.backend.joint_states_topic, self._on_joint_states, nodeutil.sensor_qos(10)
+        )
+        self.manual_subscription = self.create_subscription(
+            String, self.manual_topic, self._on_manual, 10
+        )
+        self.odom_subscription = self.create_subscription(
+            Odometry, self.odom_topic, self._on_odom, nodeutil.sensor_qos(10)
+        )
+        self.initial_pose_subscription = self.create_subscription(
+            PoseWithCovarianceStamped,
+            self.initial_pose_topic,
+            self._on_initial_pose,
+            nodeutil.latched_qos(1),
         )
 
         # -- actions -------------------------------------------------------- #
@@ -152,6 +202,16 @@ class ExcavationNode(Node):
             self.config.sand.berm.target_height_m,
             run=self._run_gz,
         )
+        # The rover's dig/dump dust emitters live in the robot SDF; this is the
+        # only thing that turns them on and off.
+        self.gz_robot_model = str(
+            nodeutil.declare(self, "gz_robot_model", "rover", "spawned rover model name for particle effects")
+        )
+        self.particles = GzParticles(
+            self.gz_robot_model,
+            (("ladder_link", "dig_dust"), ("base_link", "dump_sand")),
+            run=self._run_gz,
+        )
         if start_stowed:
             self.mechanism.stow()
 
@@ -162,7 +222,8 @@ class ExcavationNode(Node):
             f"{target.width:g}x{target.height:g} m x {self.config.sand.berm.target_height_m:g} m "
             f"({self.config.berm_target_volume_m3 * 1000.0:.1f} L), "
             f"tub {self.config.mechanism.tub.capacity_m3 * 1000.0:.1f} L, "
-            f"gz berm {'on' if self.visual.enabled else 'off'}"
+            f"gz berm {'on' if self.visual.enabled else 'off'}, "
+            f"manual commands on {self.manual_topic}"
         )
 
     # ------------------------------------------------------------------ #
@@ -194,6 +255,122 @@ class ExcavationNode(Node):
             return
         self._joint_pitch = float(message.position[names.index(joint)])
 
+    def _on_odom(self, message: Odometry) -> None:
+        pose = message.pose.pose
+        self._odom_pose = (
+            float(pose.position.x),
+            float(pose.position.y),
+            _yaw_from_quaternion(
+                float(pose.orientation.x),
+                float(pose.orientation.y),
+                float(pose.orientation.z),
+                float(pose.orientation.w),
+            ),
+        )
+        self._have_odom = True
+
+    def _on_initial_pose(self, message: PoseWithCovarianceStamped) -> None:
+        pose = message.pose.pose
+        self._init_pose = (
+            float(pose.position.x),
+            float(pose.position.y),
+            _yaw_from_quaternion(
+                float(pose.orientation.x),
+                float(pose.orientation.y),
+                float(pose.orientation.z),
+                float(pose.orientation.w),
+            ),
+        )
+
+    def _world_pose(self) -> tuple:
+        """Rover pose in the arena/map frame, for the dump landing point."""
+        ox, oy, oyaw = self._odom_pose
+        if self._init_pose is None:
+            return (ox, oy, oyaw)
+        ix, iy, iyaw = self._init_pose
+        c, s = math.cos(iyaw), math.sin(iyaw)
+        return (ix + c * ox - s * oy, iy + s * ox + c * oy, _wrap_angle(iyaw + oyaw))
+
+    def _on_manual(self, message: String) -> None:
+        """Manual dig/dump/stop from the teleop (``V`` / ``B`` / ``N``).
+
+        ``dig`` and ``dump`` are toggles: pressing the same key again stops the
+        running work cycle.  Pressing the other key switches to it.  ``stop``
+        stops and stows; ``reset`` also clears a mechanism fault.
+        """
+        command = str(message.data).strip().lower()
+        now = nodeutil.now_seconds(self)
+        if command in ("dig", "excavate", "v"):
+            self._manual_cycle("excavate", now)
+        elif command in ("dump", "drop", "b"):
+            self._manual_cycle("dump", now)
+        elif command in ("stop", "stow", "n"):
+            self._manual_stop()
+        elif command in ("reset", "clear"):
+            self._manual_reset()
+        else:
+            self.get_logger().warn(
+                f"unknown manual command {message.data!r}; use dig, dump, stop or reset"
+            )
+
+    def _manual_cycle(self, phase: str, now: float) -> None:
+        if self.estop:
+            self.get_logger().warn(f"manual {phase} refused: e-stop is latched")
+            return
+        if self.cycle is not None and self.cycle.phase == phase:
+            self._manual_stop()
+            return
+        if self.mechanism.fault is not None:
+            self.get_logger().warn(
+                f"manual {phase} refused: {self.mechanism.fault} (send 'reset' to clear)"
+            )
+            return
+        if self.cycle is not None:
+            self.get_logger().warn(f"manual {phase} supersedes the running '{self.cycle.phase}' cycle")
+            self._stop_cycle("superseded by a manual command")
+
+        pose = self._world_pose()
+        if phase == "dump" and self.tub.is_empty:
+            self.get_logger().warn("manual dump: the tub is empty, so only the mechanism will move")
+        if self._init_pose is None:
+            self._log.warn(
+                "manual-pose",
+                "world start pose not received yet; the dump landing point uses odometry only",
+                now,
+            )
+
+        self.cycle = WorkCycleRunner(
+            self.config,
+            phase,
+            pose,
+            self.mechanism,
+            self.tub,
+            self.berm,
+            cycle_id=self.cycles_served,
+            timeout_s=0.0,
+            target_amount=0.0,
+            now=now,
+        )
+        self._manual_log_age = 0.0
+        self.get_logger().info(
+            f"manual {phase} started at ({pose[0]:.2f}, {pose[1]:.2f}, yaw {pose[2]:.2f}); "
+            f"tub {self.tub.fraction * 100.0:.0f}% full"
+        )
+
+    def _manual_stop(self) -> None:
+        if self.cycle is not None:
+            self._stop_cycle("stopped manually")
+        else:
+            self.mechanism.stow()
+        self.get_logger().info("manual stop: mechanism stowing, belt off")
+
+    def _manual_reset(self) -> None:
+        if self.cycle is not None:
+            self._stop_cycle("reset")
+        self.mechanism.clear_fault()
+        self.mechanism.stow()
+        self.get_logger().info("manual reset: fault cleared, mechanism stowing")
+
     # ------------------------------------------------------------------ #
     # the control loop
     # ------------------------------------------------------------------ #
@@ -209,6 +386,7 @@ class ExcavationNode(Node):
         if self.cycle is not None and self.cycle.stage != STAGE_DONE:
             self.cycle.step(now)
             self._publish_work_feedback()
+            self._log_manual(dt)
             if self.cycle.done:
                 self._complete_cycle()
         elif self.cycle is None:
@@ -220,9 +398,22 @@ class ExcavationNode(Node):
         if self.publish_marker:
             self._publish_marker(dt)
         self._update_gz_berm()
+        self.particles.set_all(
+            (self.mechanism.state == STATE_DIGGING, self.mechanism.state == STATE_DUMPING)
+        )
 
     def _idle_state(self) -> None:
         self.mechanism.settle_idle()
+
+    def _log_manual(self, dt: float) -> None:
+        """A once-a-second progress line for a manually triggered cycle."""
+        if self.cycle is None or self._goal_handle is not None:
+            return
+        self._manual_log_age += dt
+        if self._manual_log_age < 1.0:
+            return
+        self._manual_log_age = 0.0
+        self.get_logger().info(f"manual {self.cycle.phase}: {self.cycle.stage_name} - {self.cycle.detail}")
 
     def _send_command(self) -> None:
         target = self.mechanism.target
@@ -354,7 +545,7 @@ class ExcavationNode(Node):
             return 1
         if completed.returncode != 0:
             detail = completed.stderr.decode("utf-8", "replace").strip().splitlines()
-            self._log.warn("gz-failed", f"gz service failed: {detail[-1] if detail else completed.returncode}")
+            self._log.warn("gz-failed", f"gz command failed: {detail[-1] if detail else completed.returncode}")
         return int(completed.returncode)
 
     # ------------------------------------------------------------------ #

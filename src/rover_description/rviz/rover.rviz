@@ -7,12 +7,8 @@ Panels:
         - /Global Options1
         - /RobotModel1
         - /TF1
-        - /Image1
-        - /Image2
-        - /Image3
-        - /Image4
       Splitter Ratio: 0.5
-    Tree Height: 657
+    Tree Height: 128
 Visualization Manager:
   Class: ""
   Displays:
@@ -37,6 +33,7 @@ Visualization Manager:
     - Alpha: 1
       Class: rviz_default_plugins/RobotModel
       Collision Enabled: false
+      Description File: ""
       Description Source: Topic
       Description Topic:
         Depth: 5
@@ -45,26 +42,188 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /robot_description
       Enabled: true
+      Links:
+        All Links Enabled: true
+        Expand Joint Details: false
+        Expand Link Details: false
+        Expand Tree: false
+        Link Tree Style: Links in Alphabetic Order
+        base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        belt_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        cam_dump_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        cam_dump_optical_frame:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        cam_excavation_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        cam_excavation_optical_frame:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        cam_nav_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        cam_nav_optical_frame:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        cam_tag_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        cam_tag_optical_frame:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        funnel_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        imu_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        ladder_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        tub_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        wheel_front_left:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        wheel_front_right:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        wheel_rear_left:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        wheel_rear_right:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+      Mass Properties:
+        Inertia: false
+        Mass: false
       Name: RobotModel
-      Visual Enabled: true
+      TF Prefix: ""
+      Update Interval: 0
       Value: true
+      Visual Enabled: true
     - Class: rviz_default_plugins/TF
       Enabled: true
       Frame Timeout: 15
       Frames:
         All Enabled: true
-      Marker Scale: 0.3
+        base_link:
+          Value: true
+        belt_link:
+          Value: true
+        cam_dump_link:
+          Value: true
+        cam_dump_optical_frame:
+          Value: true
+        cam_excavation_link:
+          Value: true
+        cam_excavation_optical_frame:
+          Value: true
+        cam_nav_link:
+          Value: true
+        cam_nav_optical_frame:
+          Value: true
+        cam_tag_link:
+          Value: true
+        cam_tag_optical_frame:
+          Value: true
+        funnel_link:
+          Value: true
+        imu_link:
+          Value: true
+        ladder_link:
+          Value: true
+        rover/base_link:
+          Value: true
+        rover/odom:
+          Value: true
+        tub_link:
+          Value: true
+        wheel_front_left:
+          Value: true
+        wheel_front_right:
+          Value: true
+        wheel_rear_left:
+          Value: true
+        wheel_rear_right:
+          Value: true
+      Marker Scale: 0.30000001192092896
       Name: TF
       Show Arrows: true
       Show Axes: true
       Show Names: true
       Tree:
-        {}
+        base_link:
+          cam_dump_link:
+            cam_dump_optical_frame:
+              {}
+          cam_excavation_link:
+            cam_excavation_optical_frame:
+              {}
+          cam_nav_link:
+            cam_nav_optical_frame:
+              {}
+          cam_tag_link:
+            cam_tag_optical_frame:
+              {}
+          funnel_link:
+            {}
+          imu_link:
+            {}
+          ladder_link:
+            belt_link:
+              {}
+          tub_link:
+            {}
+          wheel_front_left:
+            {}
+          wheel_front_right:
+            {}
+          wheel_rear_left:
+            {}
+          wheel_rear_right:
+            {}
       Update Interval: 0
       Value: true
     - Class: rviz_default_plugins/Image
       Enabled: true
       Max Value: 1
+      Median window: 5
       Min Value: 0
       Name: cam_nav
       Normalize Range: true
@@ -78,6 +237,7 @@ Visualization Manager:
     - Class: rviz_default_plugins/Image
       Enabled: true
       Max Value: 1
+      Median window: 5
       Min Value: 0
       Name: cam_tag
       Normalize Range: true
@@ -91,6 +251,7 @@ Visualization Manager:
     - Class: rviz_default_plugins/Image
       Enabled: true
       Max Value: 1
+      Median window: 5
       Min Value: 0
       Name: cam_excavation
       Normalize Range: true
@@ -104,6 +265,7 @@ Visualization Manager:
     - Class: rviz_default_plugins/Image
       Enabled: true
       Max Value: 1
+      Median window: 5
       Min Value: 0
       Name: cam_dump
       Normalize Range: true
@@ -122,21 +284,51 @@ Visualization Manager:
   Name: root
   Tools:
     - Class: rviz_default_plugins/Interact
+      Hide Inactive Objects: true
     - Class: rviz_default_plugins/MoveCamera
     - Class: rviz_default_plugins/Select
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
   Value: true
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 2.5
+      Distance: 12.685396194458008
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.05999999865889549
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
       Focal Point:
         X: 0
         Y: 0
-        Z: 0.3
+        Z: 0.30000001192092896
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05000000074505806
+      Invert Z Axis: false
       Name: Current View
-      Pitch: 0.5
+      Near Clip Distance: 0.009999999776482582
+      Pitch: 0.619999885559082
       Target Frame: base_link
-      Yaw: 0.7
+      Value: Orbit (rviz_default_plugins)
+      Yaw: 0.2950003743171692
+    Saved: ~
 Window Geometry:
-  Height: 900
-  Width: 1400
+  Displays:
+    collapsed: false
+  Height: 1016
+  Hide Left Dock: false
+  Hide Right Dock: false
+  QMainWindow State: 000000ff00000000fd0000000100000000000001560000039efc0200000005fb0000001000630061006d005f00640075006d0070010000003d0000009e0000002800fffffffb0000001c00630061006d005f00650078006300610076006100740069006f006e01000000e1000000a00000002800fffffffb0000000e00630061006d005f00740061006701000001870000009e0000002800fffffffb0000000e00630061006d005f006e00610076010000022b0000009f0000002800fffffffb000000100044006900730070006c00610079007301000002d00000010b000000c900ffffff000005de0000039e00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Width: 1850
+  X: 70
+  Y: 27
+  cam_dump:
+    collapsed: false
+  cam_excavation:
+    collapsed: false
+  cam_nav:
+    collapsed: false
+  cam_tag:
+    collapsed: false

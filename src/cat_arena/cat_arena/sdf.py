@@ -42,10 +42,10 @@ __all__ = [
 class WorldAssets:
     """File names of the generated assets referenced from the world SDF."""
 
-    obj_file: str
-    mtl_file: str
+    heightmap_file: str
+    mtl_file: Optional[str] = None
     albedo_file: Optional[str] = None
-    heightmap_file: Optional[str] = None
+    normal_file: Optional[str] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -158,7 +158,23 @@ def stable_shade(name: str, spread: float = 0.28) -> float:
     return (1.0 - 0.5 * spread) + spread * unit
 
 
-def _surface(mu: float, mu2: float) -> str:
+def _surface(mu: float, mu2: float, soft_contact: bool = False) -> str:
+    contact = ""
+    if soft_contact:
+        # Dry sand gives a little under a wheel instead of a rigid, ringing
+        # contact.  These are ODE-style compliance terms; the DART backend uses
+        # them where it can and ignores them where it cannot, but either way the
+        # surface stays a normal frictional contact.
+        contact = (
+            "          <contact>\n"
+            "            <ode>\n"
+            "              <kp>100000000.0</kp>\n"
+            "              <kd>10000.0</kd>\n"
+            "              <max_vel>0.005</max_vel>\n"
+            "              <min_depth>0.0005</min_depth>\n"
+            "            </ode>\n"
+            "          </contact>\n"
+        )
     return (
         "<surface>\n"
         "          <friction>\n"
@@ -167,7 +183,8 @@ def _surface(mu: float, mu2: float) -> str:
         f"              <mu2>{mu2:.4f}</mu2>\n"
         "            </ode>\n"
         "          </friction>\n"
-        "        </surface>"
+        + contact
+        + "        </surface>"
     )
 
 
@@ -189,9 +206,20 @@ def _comment_safe(text: object) -> str:
 # section builders
 # --------------------------------------------------------------------------- #
 def _terrain_model(cfg: ArenaConfig, assets: WorldAssets, output_dir: str) -> str:
-    obj_uri = _file_uri(os.path.join(output_dir, assets.obj_file))
+    """Generate heightmap terrain model for Gazebo."""
+    hm_uri = _file_uri(os.path.join(output_dir, assets.heightmap_file))
     r, g, b = cfg.sand_color[:3]
+    mu, mu2 = cfg.terrain.friction.mu, cfg.terrain.friction.mu2
+    size_x = cfg.length_x
+    size_y = cfg.width_y
+    size_z = cfg.terrain.max_relief
+    pos_x = size_x / 2.0
+    pos_y = size_y / 2.0
+    pos_z = size_z / 2.0
+
+    # Build material with PBR textures
     if assets.albedo_file:
+        albedo_uri = _file_uri(os.path.join(output_dir, assets.albedo_file))
         material = (
             "<material>\n"
             f"          <ambient>{r * 0.55:.4f} {g * 0.55:.4f} {b * 0.55:.4f} 1</ambient>\n"
@@ -199,41 +227,45 @@ def _terrain_model(cfg: ArenaConfig, assets: WorldAssets, output_dir: str) -> st
             "          <specular>0.04 0.04 0.04 1</specular>\n"
             "          <pbr>\n"
             "            <metal>\n"
-            f"              <albedo_map>{_file_uri(os.path.join(output_dir, assets.albedo_file))}</albedo_map>\n"
+            f"              <albedo_map>{albedo_uri}</albedo_map>\n"
             "              <roughness>0.92</roughness>\n"
             "              <metalness>0.0</metalness>\n"
             "            </metal>\n"
             "          </pbr>\n"
             "        </material>"
         )
+        if assets.normal_file:
+            normal_uri = _file_uri(os.path.join(output_dir, assets.normal_file))
+            material = material.replace(
+                "              <metalness>0.0</metalness>",
+                f"              <normal_map>{normal_uri}</normal_map>\n              <metalness>0.0</metalness>"
+            )
     else:
         material = _color(cfg.sand_color, specular=0.05)
-    mu, mu2 = cfg.friction.mu, cfg.friction.mu2
-    return f"""    <!-- ==================== tilled dry sand terrain ==================== -->
-    <!-- Collision and visual both use the generated triangle mesh, so what the
-         cameras see and what the wheels feel are the same surface.
-         gz mesh loading REQUIRES vertex normals in the OBJ (verified). -->
+
+    return f"""    <!-- ==================== heightmap terrain (sand) ==================== -->
     <model name="terrain">
       <static>true</static>
-      <pose>0 0 0 0 0 0</pose>
+      <pose>{pos_x:.6f} {pos_y:.6f} {pos_z:.6f} 0 0 0</pose>
       <link name="link">
         <collision name="terrain_collision">
           <geometry>
-            <mesh>
-              <uri>{obj_uri}</uri>
-              <scale>1 1 1</scale>
-            </mesh>
+            <heightmap>
+              <uri>{hm_uri}</uri>
+              <size>{size_x:.6f} {size_y:.6f} {size_z:.6f}</size>
+              <pos>0 0 0</pos>
+            </heightmap>
           </geometry>
-          {_surface(mu, mu2)}
+          {_surface(mu, mu2, soft_contact=True)}
         </collision>
         <visual name="terrain_visual">
           <geometry>
-            <mesh>
-              <uri>{obj_uri}</uri>
-              <scale>1 1 1</scale>
-            </mesh>
+            <heightmap>
+              <uri>{hm_uri}</uri>
+              <size>{size_x:.6f} {size_y:.6f} {size_z:.6f}</size>
+              <pos>0 0 0</pos>
+            </heightmap>
           </geometry>
-          {material}
         </visual>
       </link>
     </model>"""
@@ -489,6 +521,8 @@ def build_world_sdf(
         '    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>',
         '    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>',
         '    <plugin filename="gz-sim-contact-system" name="gz::sim::systems::Contact"/>',
+        '    <plugin filename="gz-sim-particle-emitter-system" name="gz::sim::systems::ParticleEmitter"/>',
+        '    <plugin filename="gz-sim-wind-effects-system" name="gz::sim::systems::WindEffects"/>',
     ]
     if robot_plugins:
         plugins.append(
@@ -516,7 +550,7 @@ def build_world_sdf(
   sand friction        : mu={cfg.friction.mu} mu2={cfg.friction.mu2}
   wall height          : {cfg.walls.height} m (flagged assumption)
   terrain resolution   : {cfg.terrain.cell_size} m
-  terrain mesh         : {assets.obj_file} (visual + collision, vertex normals mandatory)
+  terrain heightmap    : {assets.heightmap_file} (heightmap + collision)
   boulders             : {len(boulders)}
   craters              : {len(craters)}
 {crater_lines}
