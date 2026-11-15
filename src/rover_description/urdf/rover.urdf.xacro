@@ -272,6 +272,23 @@
   </gazebo>
 
   <!-- ==================================================================== -->
+  <!-- odometry sensor on base_link                                         -->
+  <!-- ==================================================================== -->
+  <!-- odometry is published by gz-sim-imu-system on /world/cat_arena/model/rover/odometry -->
+  <!-- <gazebo reference="base_link"> -->
+  <!--   <xacro:gz_odometry name="odometry" topic="/odom" rate="50"/> -->
+  <!-- </gazebo> -->
+
+  <!-- ==================================================================== -->
+  <!-- odometry publisher (model plugin)                                    -->
+  <!-- ==================================================================== -->
+  <gazebo>
+    <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
+      <topic>odom</topic>
+    </plugin>
+  </gazebo>
+
+  <!-- ==================================================================== -->
   <!-- gz model plugins: per-wheel joint controllers (velocity mode)        -->
   <!-- Each wheel is driven independently by the skid_steer_controller ROS  -->
   <!-- node, which publishes to /wheel/<name>/cmd_vel.  No diff-drive       -->

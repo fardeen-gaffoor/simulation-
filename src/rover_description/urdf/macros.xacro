@@ -121,6 +121,16 @@
     </sensor>
   </xacro:macro>
 
+  <!-- A gz odometry sensor (wheel encoder + IMU fusion) publishing to /odom. -->
+  <xacro:macro name="gz_odometry" params="name topic rate">
+    <sensor name="${name}" type="odometry">
+      <update_rate>${rate}</update_rate>
+      <topic>${topic}</topic>
+      <always_on>1</always_on>
+      <visualize>false</visualize>
+    </sensor>
+  </xacro:macro>
+
   <!-- Wheel contact friction. -->
   <xacro:macro name="gz_surface_friction" params="mu mu2">
     <mu1>${mu}</mu1>

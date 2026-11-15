@@ -33,6 +33,8 @@ install(PROGRAMS
   scripts/motor_analysis.py
   scripts/skid_steer_controller.py
   scripts/simple_drive.py
+  scripts/sand_straight_drive_validation.py
+  scripts/odom_relay.py
   scripts/teleop_keyboard.py
   scripts/stub_topics.py
   DESTINATION lib/${PROJECT_NAME}

@@ -1,0 +1,4 @@
+COMPARE speed: gazebo final 0.0003 m/s vs sandsim achieved 0.6376 m/s (tolerance 0.15 m/s) -> FAIL
+COMPARE peak torque: gazebo 3.0656 N.m vs sandsim peak 3.9227 N.m (limit: advised max 7.35 N.m / gearbox break 9.81 N.m) -> PASS
+COMPARE steady torque: gazebo peak 3.0656 N.m vs required <= 3.92 N.m (rated 40 kg.cm) -> PASS
+FAILURES: ['straight drive speed: gazebo final 0.000 m/s vs sandsim 0.638 m/s']

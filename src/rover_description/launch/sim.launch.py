@@ -129,6 +129,15 @@ def _launch_setup(context, *args, **kwargs):
             arguments=bridge_args,
             parameters=[{"use_sim_time": True}],
         ),
+        # -- odometry relay: gz-sim-odometry-publisher-system publishes on /model/rover/odometry
+        # Use a relay node since ros_gz_bridge requires matching topic names
+        Node(
+            package="rover_description",
+            executable="odom_relay.py",
+            name="odom_relay",
+            output="screen",
+            parameters=[{"use_sim_time": True}],
+        ),
         Node(
             package="rover_description",
             executable="stub_topics.py",

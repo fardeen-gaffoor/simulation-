@@ -38,14 +38,20 @@
  *     <width_m>0.06</width_m>
  *     <longitudinal_friction_mu>0.9</longitudinal_friction_mu>
  *     <lateral_friction_mu>0.3</lateral_friction_mu>
+ *     <rod_count>8</rod_count>
+ *     <rod_diameter>0.005</rod_diameter>
+ *     <lug_height>0.02</lug_height>
+ *     <grouser_thrust_factor>1.0</grouser_thrust_factor>
  *   </plugin>
  */
 
 #include <gz/sim/System.hh>
+#include <gz/sim/components/ExternalWorldWrenchCmd.hh>
 #include <gz/sim/components/Joint.hh>
 #include <gz/sim/components/JointForceCmd.hh>
 #include <gz/sim/components/JointPosition.hh>
 #include <gz/sim/components/JointVelocity.hh>
+#include <gz/sim/components/JointVelocityCmd.hh>
 #include <gz/sim/components/Link.hh>
 #include <gz/sim/components/LinearVelocity.hh>
 #include <gz/sim/components/Name.hh>
@@ -126,6 +132,22 @@ private:
   double widthM = 0.06;
   double muLong = 0.9;
   double muLat = 0.3;
+  // Grouser (rod) effect parameters - Stage 4.  Defaults are engineering
+  // placeholders; the real rod_count / rod_diameter / lug_height values are to
+  // be calibrated from the sled pull test, and grouser_thrust_factor from the
+  // same test (default 1.0 = no benefit; sweep 1.0 - 1.4).
+  int rodCount = 8;
+  double rodDiameterM = 0.005;
+  double lugHeightM = 0.02;
+  double grouserThrustFactor = 1.0;
+  double wheelbaseM = 0.65;
+  double cgHeightM = 0.25;
+  double cgOffsetM = 0.0;
+  double trackM = 0.52;
+  Entity chassisEntityId{kNullEntity};
+  double chassisLatForce = 0.0;
+  double chassisLongForce = 0.0;
+  double chassisYawMoment = 0.0;
 
   // State
   bool configured = false;
@@ -191,6 +213,14 @@ void SandTractionPlugin::Configure(const Entity &_entity,
     muLong = _sdf->Get<double>("longitudinal_friction_mu");
   if (_sdf->HasElement("lateral_friction_mu"))
     muLat = _sdf->Get<double>("lateral_friction_mu");
+  if (_sdf->HasElement("rod_count"))
+    rodCount = _sdf->Get<int>("rod_count");
+  if (_sdf->HasElement("rod_diameter"))
+    rodDiameterM = _sdf->Get<double>("rod_diameter");
+  if (_sdf->HasElement("lug_height"))
+    lugHeightM = _sdf->Get<double>("lug_height");
+  if (_sdf->HasElement("grouser_thrust_factor"))
+    grouserThrustFactor = _sdf->Get<double>("grouser_thrust_factor");
 
   // Load lookup table
   if (!loadTable(lookupTablePath))
@@ -381,6 +411,16 @@ void SandTractionPlugin::PreUpdate(const UpdateInfo &_info,
   // Find model links to get mass/inertial if needed
   // For now, use configured mass
 
+  double vFrontSum = 0.0;
+  double vRearSum = 0.0;
+  int vFrontN = 0;
+  int vRearN = 0;
+  double yawRate = 0.0;
+  bool yawRateReady = false;
+  chassisLatForce = 0.0;
+  chassisLongForce = 0.0;
+  chassisYawMoment = 0.0;
+
   for (const auto &jn : wheelJointNames)
   {
     // Find joint entity by name
@@ -402,10 +442,36 @@ void SandTractionPlugin::PreUpdate(const UpdateInfo &_info,
       continue;
     }
 
-    // Get current joint velocity
+    chassisEntityId = _ecm.ParentEntity(jointEntity);
+
+    // Get chassis linear velocity (world frame) for accurate slip computation
+    // LinearVelocity component on the chassis entity gives vx, vy, vz in world frame
+    double vChassisX = 0.0;
+    double vChassisY = 0.0;
+    if (chassisEntityId != kNullEntity)
+    {
+      auto *linVelComp = _ecm.Component<components::LinearVelocity>(chassisEntityId);
+      if (linVelComp)
+      {
+        const auto &vec = linVelComp->Data();
+        vChassisX = vec.X();
+        vChassisY = vec.Y();
+      }
+    }
+    // Transform to chassis frame (assuming chassis yaw is small or we use x only)
+    // For straight-line motion, vChassisX is the forward speed
+    double vehicleSpeed = vChassisX; // approximation: world x-axis aligns with chassis forward
+
+    // Get commanded and actual joint velocity (rad/s)
+    double jointVelCmd = 0.0;
     double jointVel = 0.0;
+    auto *jointVelCmdComp = _ecm.Component<components::JointVelocityCmd>(jointEntity);
+    if (jointVelCmdComp && !jointVelCmdComp->Data().empty())
+    {
+      jointVelCmd = jointVelCmdComp->Data()[0];
+    }
     auto *jointVelComp = _ecm.Component<components::JointVelocity>(jointEntity);
-    if (jointVelComp)
+    if (jointVelComp && !jointVelComp->Data().empty())
     {
       jointVel = jointVelComp->Data()[0];
     }
@@ -413,53 +479,104 @@ void SandTractionPlugin::PreUpdate(const UpdateInfo &_info,
     // Get parent link (wheel link) to compute load
     // For load estimation, use configured mass evenly distributed
     // In a more refined version, we'd read link inertial mass
-    double wheelLoad = computeWheelLoad(massKg, 0.25 /* cgHeight */,
-                                        0.65 /* wheelbase */,
-                                        0.0 /* cgOffset */,
+    double wheelLoad = computeWheelLoad(massKg, cgHeightM,
+                                        wheelbaseM,
+                                        cgOffsetM,
                                         longAccel,
                                         /* front */ jn.find("front") != std::string::npos);
 
-    // Compute slip: for a driven wheel, slip = (omega*r - vx) / max(vx, omega*r)
-    // We approximate vehicle speed from wheel average or use a simple model
-    // Here: use wheel angular velocity * radius as the "free rolling" speed
-    // slip is defined against the rod-tip radius
-    double wheelSpeed = jointVel * radiusM; // m/s at rim
+    // Accumulate axle-average speeds for the yaw-rate estimate
+    if (jn.find("front") != std::string::npos)
+    {
+      vFrontSum += jointVel * radiusM;
+      ++vFrontN;
+    }
+    if (jn.find("rear") != std::string::npos)
+    {
+      vRearSum += jointVel * radiusM;
+      ++vRearN;
+    }
 
-    // Estimate vehicle forward speed (use average of all wheels or a state var)
-    // For simplicity, use the current wheel speed as reference (slip ~ 0 when
-    // rolling freely). A real implementation would track vehicle velocity.
-    double vehicleSpeed = wheelSpeed; // approximation
+    // Rod-tip radius: slip is defined against the rod tip, not the bare rim.
+    // lug_height is the (assumed) reach of the grouser lugs beyond the wheel
+    // radius and becomes the slip-reference radius.  Real rod geometry values
+    // are to be calibrated from the sled pull test.
+    double rTip = radiusM + std::max(0.0, lugHeightM);
 
+    // Wheel speed at the rod tip (m/s)
+    double wheelSpeed = jointVel * rTip;
+
+    // Longitudinal slip against the rod tip: positive = driving.
+    // slip = (wheel_speed - vehicle_speed) / wheel_speed
     double slip = 0.0;
-    double wheelRimSpeed = std::abs(jointVel) * radiusM;
-    if (wheelRimSpeed > 0.01)
+    if (wheelSpeed > 1e-6)
     {
-      slip = (wheelRimSpeed - vehicleSpeed) / wheelRimSpeed;
-      slip = std::clamp(slip, -0.9, 0.9);
+      slip = (wheelSpeed - vehicleSpeed) / wheelSpeed;
     }
+    slip = std::clamp(slip, -0.9, 0.9);
 
-    // Look up traction
-    double pull = interpPull(wheelLoad, slip);
-    double torque = interpTorque(wheelLoad, slip);
+    // Compute thrust from the lookup table (drawbar pull in Newtons)
+    double thrust = interpPull(wheelLoad, slip) * grouserThrustFactor;
 
-    // Apply longitudinal force as joint force (torque about wheel axis)
-    // The drawbar pull is a force at the contact patch; torque at the axle
-    // = pull * radius. We command joint torque.
-    double cmdTorque = torque; // N.m about wheel axle
+    // Clamp by friction cone
+    double maxThrust = muLong * wheelLoad;
+    thrust = std::clamp(thrust, -maxThrust, maxThrust);
 
-    // Clamp by friction cone (optional safety)
-    double maxTorque = muLong * wheelLoad * radiusM;
-    cmdTorque = std::clamp(cmdTorque, -maxTorque, maxTorque);
+    // Accumulate longitudinal thrust on the chassis (force along x-axis)
+    chassisLongForce += thrust;
 
-    // Set joint force command
-    auto *forceCmd = _ecm.Component<components::JointForceCmd>(jointEntity);
-    if (!forceCmd)
+    // NO joint force command - wheels are velocity-controlled by the
+    // skid_steer_controller via gz-sim-joint-controller-system.
+    // The traction force is applied as an external wrench on the chassis.
+
+    // Lateral force: mu_lat * normal load, scaled by the estimated lateral
+    // slip (yaw-rate driven).  Estimated yaw rate comes from the difference of
+    // front/rear axle average speeds; in straight line (yaw ~ 0) no lateral
+    // force is applied and the wheel only sees longitudinal traction.
+    if (!yawRateReady)
     {
-      _ecm.CreateComponent(jointEntity, components::JointForceCmd{std::vector<double>{cmdTorque}});
+      double vFrontAvg = (vFrontN > 0) ? vFrontSum / vFrontN : 0.0;
+      double vRearAvg = (vRearN > 0) ? vRearSum / vRearN : 0.0;
+      yawRate = (vFrontAvg - vRearAvg) / wheelbaseM;
+      yawRateReady = true;
     }
-    else
+    double lateralOffset = (jn.find("left") != std::string::npos) ? (trackM / 2.0) : (-trackM / 2.0);
+    double latSlip = 0.0;
+    if (wheelSpeed > 1e-6)
     {
-      forceCmd->Data()[0] = cmdTorque;
+      latSlip = std::min(1.0, std::abs(yawRate) * std::abs(lateralOffset) / wheelSpeed);
+    }
+    double fLat = muLat * wheelLoad * latSlip;
+
+    // Accumulate lateral force and yaw moment on the chassis.
+    chassisLatForce += fLat;
+    chassisYawMoment += fLat * std::abs(lateralOffset);
+  }
+
+  // Apply the accumulated lateral traction wrench (force + yaw moment) to the
+  // rover chassis through the external world wrench component.
+  {
+    Entity chassisEntity = chassisEntityId;
+    if (chassisEntity != kNullEntity)
+    {
+      auto *wrenchCmd = _ecm.Component<components::ExternalWorldWrenchCmd>(chassisEntity);
+      if (!wrenchCmd)
+      {
+        _ecm.CreateComponent(chassisEntity, components::ExternalWorldWrenchCmd{});
+      }
+      auto *wrenchCmdNow = _ecm.Component<components::ExternalWorldWrenchCmd>(chassisEntity);
+      if (wrenchCmdNow)
+      {
+        auto &wrench = wrenchCmdNow->Data();
+        auto *force = wrench.mutable_force();
+        force->set_x(chassisLongForce);
+        force->set_y(chassisLatForce);
+        force->set_z(0.0);
+        auto *torque = wrench.mutable_torque();
+        torque->set_x(0.0);
+        torque->set_y(0.0);
+        torque->set_z(chassisYawMoment);
+      }
     }
   }
 }

@@ -164,6 +164,10 @@ def _launch_setup(context, *args, **kwargs):
             '  <width_m>0.06</width_m>\n'
             '  <longitudinal_friction_mu>0.9</longitudinal_friction_mu>\n'
             '  <lateral_friction_mu>0.3</lateral_friction_mu>\n'
+            '  <rod_count>8</rod_count>\n'
+            '  <rod_diameter>0.005</rod_diameter>\n'
+            '  <lug_height>0.02</lug_height>\n'
+            '  <grouser_thrust_factor>1.0</grouser_thrust_factor>\n'
             '</plugin>\n'
         )
         world_text = world_text.replace("</world>", plugin_xml + "</world>", 1)

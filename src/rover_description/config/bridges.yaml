@@ -30,6 +30,8 @@ bridges:
   # --- inertial + wheel odometry + joint states ------------------------------
   - {ros_topic: /imu,          gz_topic: /imu,          ros_type: sensor_msgs/msg/Imu,        gz_type: gz.msgs.IMU,      direction: gz_to_ros}
   - {ros_topic: /odom,         gz_topic: /odom,         ros_type: nav_msgs/msg/Odometry,      gz_type: gz.msgs.Odometry, direction: gz_to_ros}
+  # Odometry from gz-sim-odometry-publisher-system on /model/rover/odometry
+  - {ros_topic: /model/rover/odometry, gz_topic: /model/rover/odometry, ros_type: nav_msgs/msg/Odometry, gz_type: gz.msgs.Odometry, direction: gz_to_ros}
   - {ros_topic: /tf,           gz_topic: /tf,           ros_type: tf2_msgs/msg/TFMessage,     gz_type: gz.msgs.Pose_V,   direction: gz_to_ros}
   - {ros_topic: /joint_states, gz_topic: /joint_states, ros_type: sensor_msgs/msg/JointState, gz_type: gz.msgs.Model,    direction: gz_to_ros}
 
