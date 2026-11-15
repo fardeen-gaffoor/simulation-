@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>sandsim_plugin</name>
+  <version>0.1.0</version>
+  <description>
+    Gazebo Harmonic (gz-sim 8) system plugin that applies sand traction forces
+    to rover wheels using a seedable lookup table exported by the sandsim
+    terramechanics tool (Bekker-Wong model). The plugin reads a load x slip
+    lookup table (drawbar pull and torque vs slip) and applies the corresponding
+    longitudinal force and resisting torque to each wheel joint each simulation
+    step.
+  </description>
+  <maintainer email="team@cat-arena.local">Caterpillar Autonomy Challenge team</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>cmake</buildtool_depend>
+  <buildtool_depend>gcc</buildtool_depend>
+  <buildtool_depend>g++</buildtool_depend>
+
+  <depend>gz-plugin2</depend>
+  <depend>gz-msgs10</depend>
+  <depend>gz-math7</depend>
+  <depend>sdformat14</depend>
+
+  <exec_depend>gz-sim8</exec_depend>
+
+  <export>
+    <build_type>cmake</build_type>
+  </export>
+</package>

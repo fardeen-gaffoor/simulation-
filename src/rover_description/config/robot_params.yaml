@@ -1,0 +1,66 @@
+# =============================================================================
+# rover_description / config / robot_params.yaml
+#
+# Stage 1 of PROMPT_ROVER_SIM.md: rover parameters, every value tagged
+# ``given`` (stated in the prompt) or ``assumed`` (engineering choice, to be
+# confirmed/measured).  Never invent datasheet values - anything not given is
+# flagged assumed and listed in the requirements report.
+#
+# Frame convention: base_link origin = centre of chassis footprint at wheel
+# axle height, robot resting on flat ground (wheel contact plane is z = 0).
+#   +x -> forward (declared competition forward)   +y -> left   +z -> up
+# =============================================================================
+
+schema_version: 1
+
+meta:
+  name: "Caterpillar Autonomy Challenge - berm construction rover"
+  source: "PROMPT_ROVER_SIM.md Stage 1"
+  declared_forward: "+x"
+
+# Competition limits (fixed by the rules - given)
+limits:
+  envelope:
+    length_x: {value: 1.5,  tag: "given",  comment: "competition stowed envelope length"}
+    width_y:  {value: 0.75, tag: "given",  comment: "competition stowed envelope width"}
+    height_z: {value: 0.75, tag: "given",  comment: "competition stowed envelope height"}
+  mass_ceiling_kg: {value: 80.0, tag: "given", comment: "competition mass ceiling including battery and markers"}
+
+# --- Mass budget ------------------------------------------------------------
+# Total mass: 50 kg MAXIMUM including body and wheels (given).
+mass:
+  total_max_kg: {value: 50.0, tag: "given", comment: "50 kg maximum including body and wheels"}
+  wheel_mass_kg:    {value: 3.0,  tag: "assumed", comment: "per wheel, iron, figure for finished wheel"}
+  motor_mass_kg:    {value: 0.30, tag: "assumed", comment: "per motor, 300 g per listing"}
+  num_motors:       {value: 4,    tag: "given",   comment: "one motor per wheel"}
+  battery_mass_kg:  {value: 3.5,  tag: "assumed", comment: "chemistry unknown, parameter"}
+  ladder_mass_kg:   {value: 5.0,  tag: "assumed", comment: "conveyor ladder assembly"}
+  tub_funnel_mass_kg: {value: 4.0, tag: "assumed", comment: "tub and funnel combined"}
+  electronics_wiring_mass_kg: {value: 2.0, tag: "assumed", comment: "electronics and wiring"}
+  # frame_mass_kg is COMPUTED: 50 - sum(above).  Tag: assumed (derived).
+  frame_mass_kg: {value: null, tag: "assumed", comment: "computed remainder of the 50 kg budget"}
+
+# --- Body geometry ----------------------------------------------------------
+geometry:
+  overall_length_m:   {value: 0.81, tag: "given", comment: "overall rover length"}
+  body_width_m:       {value: 0.41, tag: "given", comment: "body (frame) width, about"}
+  overall_width_over_wheels_m: {value: 0.60, tag: "given", comment: "overall width over the wheels"}
+  track_m:            {value: 0.54, tag: "derived", comment: "0.60 - 0.06 wheel width"}
+  wheelbase_m:        {value: 0.65, tag: "assumed", comment: "CONFLICT: 0.65 + 0.20 dia = 0.85 m > 0.81 m overall length - flagged"}
+  ground_clearance_m: {value: 0.20, tag: "given", comment: "underside of body above ground, confirmed"}
+  gap_frame_to_wheel_m: {value: 0.035, tag: "derived", comment: "about, from (0.60 - 0.54)/2 / 2"}
+
+# --- Excavation -------------------------------------------------------------
+excavation:
+  ladder_height_m:   {value: 0.60, tag: "given", comment: "conveyor ladder height"}
+  belt_width_m:      {value: 0.12, tag: "given", comment: "belt width"}
+  ladder_pitch_min_deg: {value: 10.0, tag: "assumed", comment: "pitch range lower bound"}
+  ladder_pitch_max_deg: {value: 70.0, tag: "assumed", comment: "pitch range upper bound"}
+  belt_speed_mps:    {value: 0.4,  tag: "assumed", comment: "conveyor belt speed"}
+  flight_spacing_m:  {value: 0.12, tag: "assumed", comment: "visual flights every 0.12 m"}
+
+# --- Drive ------------------------------------------------------------------
+drive:
+  num_wheels:        {value: 4,    tag: "given",   comment: "4-wheel drive"}
+  drive_type:        {value: "skid_steer", tag: "given", comment: "one motor per wheel"}
+  target_speed_mps:  {value: 0.5,  tag: "given",   comment: "target speed on level sand"}

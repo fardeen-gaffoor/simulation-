@@ -102,8 +102,13 @@ def test_stable_shade_is_stable_and_bounded():
 # --------------------------------------------------------------------------- #
 # world structure
 # --------------------------------------------------------------------------- #
-def _assets(obj="terrain.obj"):
-    return WorldAssets(obj_file=obj, mtl_file="terrain.mtl", albedo_file="sand_albedo.png")
+def _assets(obj="terrain_visual.obj"):
+    return WorldAssets(
+        heightmap_file="height.png",
+        visual_mesh_file=obj,
+        mtl_file="terrain.mtl",
+        albedo_file="sand_albedo.png",
+    )
 
 
 def _world(cfg, boulders=(), craters=(), camera=None):
@@ -169,16 +174,24 @@ def test_terrain_model_uses_the_mesh_for_visual_and_collision(cfg):
     terrain = world.find("./model[@name='terrain']")
     assert terrain is not None
     link = terrain.find("link")
-    uris = [mesh.find("uri").text for mesh in link.findall(".//mesh")]
-    assert len(uris) == 2, "terrain needs a visual mesh and a collision mesh"
-    for uri in uris:
-        assert uri.endswith("terrain.obj")
-        assert uri.startswith("file://")
+    visuals = link.findall("visual")
+    assert len(visuals) == 1, "terrain needs exactly one visual (the mesh)"
+    visual = visuals[0]
+    assert visual.get("name") == "terrain_visual"
+    visual_uri = visual.find("geometry/mesh/uri").text
+    assert visual_uri.endswith("terrain_visual.obj")
+    assert visual_uri.startswith("file://")
+    collision = link.find("collision")
+    assert collision is not None
+    assert collision.get("name") == "terrain_collision"
+    collision_uri = collision.find("geometry/heightmap/uri").text
+    assert collision_uri.endswith("height.png")
+    assert collision_uri.startswith("file://")
     for surface in link.findall(".//surface"):
         mu = surface.find("friction/ode/mu")
         mu2 = surface.find("friction/ode/mu2")
-        assert float(mu.text) == pytest.approx(cfg.friction.mu)
-        assert float(mu2.text) == pytest.approx(cfg.friction.mu2)
+        assert float(mu.text) == pytest.approx(cfg.terrain.friction.mu)
+        assert float(mu2.text) == pytest.approx(cfg.terrain.friction.mu2)
     assert link.find("collision").get("name") == "terrain_collision"
     assert link.find("visual").get("name") == "terrain_visual"
 
@@ -238,6 +251,31 @@ def test_boulders_and_craters_are_rendered(cfg):
         radius = float(model.find(".//collision/geometry/sphere/radius").text)
         assert radius == pytest.approx(boulder.radius)
         assert model.find("static").text in ("true", "1")
+
+
+def test_boulders_use_rock_mesh_visual_when_provided(cfg):
+    boulders = [Boulder("boulder_0", 3.0, 2.0, 0.35, 0.25, 0.0, "obstacle")]
+    rock_meshes = {"boulder_0": "/tmp/cat_arena_test/rock_boulder_0.obj"}
+    root = ET.fromstring(
+        build_world_sdf(
+            cfg=cfg,
+            assets=WorldAssets(
+                heightmap_file="height.png", visual_mesh_file="terrain_visual.obj", rock_meshes=rock_meshes
+            ),
+            output_dir="/tmp/cat_arena_test",
+            boulders=boulders,
+            seed=42,
+        )
+    )
+    world = root.find("world")
+    model = world.find("./model[@name='boulder_0']")
+    assert model is not None
+    # collision stays a sphere
+    radius = float(model.find(".//collision/geometry/sphere/radius").text)
+    assert radius == pytest.approx(0.35 / 2.0)
+    # visual is the rock mesh (absolute file:// URI)
+    mesh_uri = model.find(".//visual/geometry/mesh/uri").text
+    assert mesh_uri == "file:///tmp/cat_arena_test/rock_boulder_0.obj"
 
 
 def test_header_documents_the_seed_and_assumptions(cfg):

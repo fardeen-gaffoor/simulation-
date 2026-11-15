@@ -203,8 +203,18 @@ def validate_urdf(urdf_text: str, cfg: RoverConfig) -> List[str]:
             problems.append(f"forbidden token {banned!r} found in the model")
 
     plugins = [f"{e.get('filename') or ''} {e.get('name') or ''}" for e in root.iter("plugin")]
-    if not any("diff-drive" in p for p in plugins):
-        problems.append("gz diff-drive plugin not found")
+    # Per-wheel joint controllers replace the single diff-drive plugin
+    # (Stage 2: per-wheel velocity control keeps wheels visible/controllable).
+    wheel_controller_names = []
+    for e in root.iter("plugin"):
+        if e.get("name") == "gz::sim::systems::JointController":
+            jn = e.find("joint_name")
+            if jn is not None and jn.text and jn.text.startswith("wheel_"):
+                wheel_controller_names.append(jn.text)
+    if len(wheel_controller_names) != 4:
+        problems.append(
+            f"expected 4 per-wheel joint controllers for wheels, found {len(wheel_controller_names)}: {wheel_controller_names}"
+        )
     if not any("joint-state-publisher" in p for p in plugins):
         problems.append("gz joint-state-publisher plugin not found")
 

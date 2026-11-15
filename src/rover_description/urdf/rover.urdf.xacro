@@ -38,6 +38,8 @@
   <xacro:property name="j_fric"   value="${cfg['drive']['joint_friction']}"/>
   <xacro:property name="max_torque" value="${cfg['drive']['max_wheel_torque']}"/>
   <xacro:property name="max_wvel"  value="${cfg['drive']['max_wheel_velocity']}"/>
+  <xacro:property name="max_wheel_torque" value="${cfg['drive']['max_wheel_torque']}"/>
+  <xacro:property name="max_wheel_velocity" value="${cfg['drive']['max_wheel_velocity']}"/>
   <xacro:property name="wheel_accel" value="${cfg['drive']['max_wheel_acceleration']}"/>
   <xacro:property name="wheel_mu"  value="${cfg['drive']['wheel_mu']}"/>
   <xacro:property name="wheel_mu2" value="${cfg['drive']['wheel_mu2']}"/>
@@ -78,23 +80,94 @@
     geom_origin="${cfg['chassis']['center'][0]} ${cfg['chassis']['center'][1]} ${cfg['chassis']['center'][2]}"/>
 
   <!-- ==================================================================== -->
-  <!-- wheels + continuous joints (skid steer)                              -->
+  <!-- cage wheels + continuous joints (skid steer)                         -->
+  <!-- Visual: two sprocket discs + ring of rods.  Collision: single        -->
+  <!-- cylinder at the rod-tip radius (sand packs between rods, so the      -->
+  <!-- open cage behaves like a lugged drum).                               -->
   <!-- ==================================================================== -->
-  <xacro:macro name="wheel" params="name x y">
-    <xacro:cylinder_link name="${name}" radius="${wheel_r}" length="${wheel_w}"
-      rgba="${wheel_rgba}" ikey="${name}"/>
+  <xacro:macro name="cage_wheel" params="name x y">
+    <xacro:property name="rod_r" value="0.004"/>
+    <xacro:property name="rod_len" value="${wheel_w}"/>
+    <xacro:property name="sq2" value="0.7071067811865476"/>
+
+    <link name="${name}">
+      <xacro:inertial_from_table key="${name}"/>
+
+      <!-- front sprocket disc -->
+      <visual name="${name}_sprocket_front">
+        <origin xyz="0 ${wheel_w/2} 0" rpy="0 0 0"/>
+        <geometry><cylinder radius="${wheel_r}" length="0.02"/></geometry>
+        <material name="${name}_front_mat"><color rgba="${wheel_rgba}"/></material>
+      </visual>
+      <!-- rear sprocket disc -->
+      <visual name="${name}_sprocket_rear">
+        <origin xyz="0 ${-wheel_w/2} 0" rpy="0 0 0"/>
+        <geometry><cylinder radius="${wheel_r}" length="0.02"/></geometry>
+        <material name="${name}_rear_mat"><color rgba="${wheel_rgba}"/></material>
+      </visual>
+      <!-- 8 cage rods at 45-degree intervals (visual simplification of 25 rods) -->
+      <visual name="${name}_rod_0">
+        <origin xyz="${wheel_r} 0 0" rpy="0 1.5707963267948966 0"/>
+        <geometry><cylinder radius="${rod_r}" length="${rod_len}"/></geometry>
+        <material name="${name}_rod0_mat"><color rgba="${wheel_rgba}"/></material>
+      </visual>
+      <visual name="${name}_rod_1">
+        <origin xyz="${sq2*wheel_r} 0 ${sq2*wheel_r}" rpy="0 1.5707963267948966 0"/>
+        <geometry><cylinder radius="${rod_r}" length="${rod_len}"/></geometry>
+        <material name="${name}_rod1_mat"><color rgba="${wheel_rgba}"/></material>
+      </visual>
+      <visual name="${name}_rod_2">
+        <origin xyz="0 0 ${wheel_r}" rpy="0 1.5707963267948966 0"/>
+        <geometry><cylinder radius="${rod_r}" length="${rod_len}"/></geometry>
+        <material name="${name}_rod2_mat"><color rgba="${wheel_rgba}"/></material>
+      </visual>
+      <visual name="${name}_rod_3">
+        <origin xyz="${-sq2*wheel_r} 0 ${sq2*wheel_r}" rpy="0 1.5707963267948966 0"/>
+        <geometry><cylinder radius="${rod_r}" length="${rod_len}"/></geometry>
+        <material name="${name}_rod3_mat"><color rgba="${wheel_rgba}"/></material>
+      </visual>
+      <visual name="${name}_rod_4">
+        <origin xyz="${-wheel_r} 0 0" rpy="0 1.5707963267948966 0"/>
+        <geometry><cylinder radius="${rod_r}" length="${rod_len}"/></geometry>
+        <material name="${name}_rod4_mat"><color rgba="${wheel_rgba}"/></material>
+      </visual>
+      <visual name="${name}_rod_5">
+        <origin xyz="${-sq2*wheel_r} 0 ${-sq2*wheel_r}" rpy="0 1.5707963267948966 0"/>
+        <geometry><cylinder radius="${rod_r}" length="${rod_len}"/></geometry>
+        <material name="${name}_rod5_mat"><color rgba="${wheel_rgba}"/></material>
+      </visual>
+      <visual name="${name}_rod_6">
+        <origin xyz="0 0 ${-wheel_r}" rpy="0 1.5707963267948966 0"/>
+        <geometry><cylinder radius="${rod_r}" length="${rod_len}"/></geometry>
+        <material name="${name}_rod6_mat"><color rgba="${wheel_rgba}"/></material>
+      </visual>
+      <visual name="${name}_rod_7">
+        <origin xyz="${sq2*wheel_r} 0 ${-sq2*wheel_r}" rpy="0 1.5707963267948966 0"/>
+        <geometry><cylinder radius="${rod_r}" length="${rod_len}"/></geometry>
+        <material name="${name}_rod7_mat"><color rgba="${wheel_rgba}"/></material>
+      </visual>
+
+      <!-- collision: cylinder at rod-tip radius -->
+      <collision name="${name}_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry><cylinder radius="${wheel_r}" length="${wheel_w}"/></geometry>
+      </collision>
+    </link>
+
     <xacro:continuous_joint name="${name}_joint" parent="base_link" child="${name}"
       xyz="${x} ${y} ${wheel_r}" rpy="-1.5707963267948966 0 0" axis="0 0 1"
-      damping="${j_damp}" friction="${j_fric}"/>
+      damping="${j_damp}" friction="${j_fric}"
+      effort="${max_wheel_torque}" velocity="${max_wheel_velocity}"/>
+
     <gazebo reference="${name}">
       <xacro:gz_surface_friction mu="${wheel_mu}" mu2="${wheel_mu2}"/>
     </gazebo>
   </xacro:macro>
 
-  <xacro:wheel name="wheel_front_left"  x="${wheelbase/2}"  y="${track/2}"/>
-  <xacro:wheel name="wheel_front_right" x="${wheelbase/2}"  y="-${track/2}"/>
-  <xacro:wheel name="wheel_rear_left"   x="-${wheelbase/2}" y="${track/2}"/>
-  <xacro:wheel name="wheel_rear_right"  x="-${wheelbase/2}" y="-${track/2}"/>
+  <xacro:cage_wheel name="wheel_front_left"  x="${wheelbase/2}"  y="${track/2}"/>
+  <xacro:cage_wheel name="wheel_front_right" x="${wheelbase/2}"  y="-${track/2}"/>
+  <xacro:cage_wheel name="wheel_rear_left"   x="-${wheelbase/2}" y="${track/2}"/>
+  <xacro:cage_wheel name="wheel_rear_right"  x="-${wheelbase/2}" y="-${track/2}"/>
 
   <!-- ==================================================================== -->
   <!-- excavation: ladder (pitch), belt (continuous), tub, funnel           -->
@@ -111,7 +184,7 @@
     rgba="${belt_rgba}" ikey="belt_link"/>
   <xacro:continuous_joint name="belt_joint" parent="ladder_link" child="belt_link"
     xyz="${lad_len} 0 0" rpy="-1.5707963267948966 0 0" axis="0 0 1"
-    damping="0.01" friction="0.01"/>
+    damping="0.01" friction="0.01" effort="20.0" velocity="20.0"/>
 
   <xacro:box_link name="tub_link"
     size="${cfg['excavation']['tub']['size'][0]} ${cfg['excavation']['tub']['size'][1]} ${cfg['excavation']['tub']['size'][2]}"
@@ -199,27 +272,17 @@
   </gazebo>
 
   <!-- ==================================================================== -->
-  <!-- gz model plugins: skid-steer diff drive + joint states               -->
+  <!-- gz model plugins: per-wheel joint controllers (velocity mode)        -->
+  <!-- Each wheel is driven independently by the skid_steer_controller ROS  -->
+  <!-- node, which publishes to /wheel/<name>/cmd_vel.  No diff-drive       -->
+  <!-- plugin is used: per-wheel control keeps the wheels visible and       -->
+  <!-- controllable individually.                                           -->
   <!-- ==================================================================== -->
   <gazebo>
-    <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
-      <left_joint>wheel_front_left_joint</left_joint>
-      <left_joint>wheel_rear_left_joint</left_joint>
-      <right_joint>wheel_front_right_joint</right_joint>
-      <right_joint>wheel_rear_right_joint</right_joint>
-      <wheel_separation>${track}</wheel_separation>
-      <wheel_radius>${wheel_r}</wheel_radius>
-      <max_wheel_torque>${max_torque}</max_wheel_torque>
-      <max_wheel_acceleration>${wheel_accel}</max_wheel_acceleration>
-      <topic>${t_cmd_vel}</topic>
-      <odom_topic>${t_odom}</odom_topic>
-      <tf_topic>${t_tf}</tf_topic>
-      <publish_odom>true</publish_odom>
-      <publish_odom_tf>true</publish_odom_tf>
-      <publish_wheel_tf>false</publish_wheel_tf>
-      <odom_frame>odom</odom_frame>
-      <child_frame>base_link</child_frame>
-    </plugin>
+    <xacro:gz_wheel_controller joint="wheel_front_left_joint"  topic="/wheel/wheel_front_left/cmd_vel" max_vel="${max_wheel_velocity}"/>
+    <xacro:gz_wheel_controller joint="wheel_front_right_joint" topic="/wheel/wheel_front_right/cmd_vel" max_vel="${max_wheel_velocity}"/>
+    <xacro:gz_wheel_controller joint="wheel_rear_left_joint"   topic="/wheel/wheel_rear_left/cmd_vel"  max_vel="${max_wheel_velocity}"/>
+    <xacro:gz_wheel_controller joint="wheel_rear_right_joint"  topic="/wheel/wheel_rear_right/cmd_vel" max_vel="${max_wheel_velocity}"/>
     <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
       <topic>${t_joints}</topic>
     </plugin>

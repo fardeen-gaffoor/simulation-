@@ -1,0 +1,45 @@
+# -----------------------------------------------------------------------------
+# Arena appearance parameters -- see PROMPT_SAND.md, "APPEARANCE PARAMETERS".
+#
+# Stage A consumes the *sand* surface parameters from here (albedo patches,
+# grain, ripples).  Stages B-D widen the same file with track marks, footprints,
+# chalk lines, rocks, craters, props, walls and lighting.
+#
+# Every value documents its randomisation range; the generator samples within
+# the range, so different seeds vary the arena without breaking the ranges.
+# -----------------------------------------------------------------------------
+
+# --- sand surface ------------------------------------------------------------
+sand_base_color: [194, 170, 128]        # RGB 0-255; ~#C2AA80 warm sand
+patch_contrast: [0.30, 0.70]            # low-frequency damp/dry patch amplitude ratio
+damp_fraction: 0.40                     # fraction of the arena that is damp sand
+grain_scale: 0.40                       # fine-grain amplitude factor
+ripple_amplitude_mm: 6                  # micro-relief ripples (mm)
+ripple_wavelength_cm: 30                # ripples (cm wavelength)
+
+# --- tracked-rover surface disturbance --------------------------------------
+footprint_density: 0.60                 # probability of a footprint per spot
+track_band_count: 2                     # number of parallel cleat bands
+track_band_width_cm: 20                 # 15-25 cm wide bands
+track_cleat_pitch_cm: 6                 # cleat ridge every 4-8 cm
+
+# --- markings ----------------------------------------------------------------
+chalk_line_breakup: 0.50                 # irregularity of chalk lines (0-1)
+
+# --- rocks -------------------------------------------------------------------
+rock_count: 4
+rock_diameter_cm: [30, 40]              # competition rule: 30-40 cm
+rock_color_palette: ["#B4733F", "#C9A27A", "#8A5A33", "#A0522D"]
+
+# --- craters -----------------------------------------------------------------
+crater_count: 5                          # at least 3 required by the rules
+crater_width_cm: [40, 50]                # competition arena: 30-50 cm wide pits
+crater_depth_cm: [20, 40]                # shallow pits, darker damp floors
+crater_rim_height_cm: [10, 20]          # slightly raised rims
+
+# --- props / walls / lighting -------------------------------------------------
+props_enabled: true
+wall_height_m: 0.5                       # assumed (unconfirmed) competition value
+backdrop_style: tent                    # tent | plain
+sun_elevation_deg: 45.0
+tent_diffuse_fraction: 0.25

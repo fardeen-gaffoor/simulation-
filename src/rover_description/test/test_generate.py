@@ -103,4 +103,6 @@ def test_sdf_conversion(tmp_path, config_path):
     for topic in CAMERA_TOPICS:
         assert f"<topic>{topic}</topic>" in sdf
     assert "<topic>/imu</topic>" in sdf
-    assert "gz-sim-diff-drive-system" in sdf
+    # Stage 2: per-wheel joint controllers replace diff-drive
+    assert sdf.count("joint-controller-system") >= 4
+    assert "wheel_front_left_joint" in sdf

@@ -66,12 +66,13 @@
     </joint>
   </xacro:macro>
 
-  <xacro:macro name="continuous_joint" params="name parent child xyz rpy axis damping friction">
+  <xacro:macro name="continuous_joint" params="name parent child xyz rpy axis damping friction effort velocity">
     <joint name="${name}" type="continuous">
       <parent link="${parent}"/>
       <child link="${child}"/>
       <origin xyz="${xyz}" rpy="${rpy}"/>
       <axis xyz="${axis}"/>
+      <limit effort="${effort}" velocity="${velocity}"/>
       <dynamics damping="${damping}" friction="${friction}"/>
     </joint>
   </xacro:macro>
@@ -128,6 +129,24 @@
     <kd>100.0</kd>
     <minDepth>0.0005</minDepth>
     <maxVel>0.05</maxVel>
+  </xacro:macro>
+
+  <!-- A gz joint controller in velocity mode for a driven wheel.              -->
+  <!-- Publishes to a global <topic> (not <sub_topic>) so ros_gz_bridge can    -->
+  -- reach it.  use_force_commands=false => the topic carries a velocity       -->
+  -- setpoint (gz.msgs.Double), not a force/torque.                            -->
+  <xacro:macro name="gz_wheel_controller" params="joint topic max_vel p_gain:='10.0' i_gain:='0.0' d_gain:='1.0'">
+    <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
+      <joint_name>${joint}</joint_name>
+      <topic>${topic}</topic>
+      <use_force_commands>false</use_force_commands>
+      <initial_velocity>0.0</initial_velocity>
+      <p_gain>${p_gain}</p_gain>
+      <i_gain>${i_gain}</i_gain>
+      <d_gain>${d_gain}</d_gain>
+      <cmd_max>${max_vel}</cmd_max>
+      <cmd_min>${-max_vel}</cmd_min>
+    </plugin>
   </xacro:macro>
 
 </robot>

@@ -1,0 +1,59 @@
+# -----------------------------------------------------------------------------
+# Prop definitions for Stage C of PROMPT_SAND.md.
+#
+# Each prop is toggleable via ``enabled``.  Positions are arena-frame (metres):
+# origin = west-south corner, x = east, y = north, z = up.  Props are static
+# decorations and fixed obstacles; they are recorded in ground_truth.yaml for
+# tests and dataset labels only (never fed to the autonomy stack).
+#
+# Positions are chosen to avoid the start zone [0,2.7]x[2.7,5] and the berm
+# target patch, and to sit clear of the seeded boulder/crater placement zones
+# where possible.  Stage D randomisation will jitter positions per seed.
+# -----------------------------------------------------------------------------
+
+props:
+  enabled: true
+
+  # Flat yellow board (~1.2 x 0.6 m, #E9C21B) - berm target marker.
+  # Placed just inside the berm_target footprint inside the construction zone.
+  berm_board:
+    enabled: true
+    shape: box
+    size: [1.2, 0.6, 0.02]
+    color: [0.910, 0.761, 0.106, 1.0]      # #E9C21B yellow
+    position: [1.0, 0.75, 0.01]
+    zone: berm_target
+    static: true
+
+  # Small white box (~0.35 m cube).
+  small_white_box:
+    enabled: true
+    shape: box
+    size: [0.35, 0.35, 0.35]
+    color: [0.95, 0.95, 0.95, 1.0]         # white
+    position: [5.5, 2.5, 0.175]
+    zone: obstacle
+    static: true
+
+  # Yellow-and-black box (~0.4 m) with a black stripe / logo area.
+  yellow_black_box:
+    enabled: true
+    shape: box
+    size: [0.4, 0.4, 0.4]
+    color: [1.0, 0.843, 0.0, 1.0]          # yellow face
+    stripe_color: [0.05, 0.05, 0.05, 1.0]  # black stripe
+    position: [3.5, 1.0, 0.2]
+    zone: obstacle
+    static: true
+
+  # Tall thin white pole (~0.05 m dia, 1.75 m) near the arena middle.
+  # Treated as a fixed obstacle with class ``prop`` in the ground truth.
+  white_pole:
+    enabled: true
+    shape: cylinder
+    radius: 0.025
+    height: 1.75
+    color: [0.95, 0.95, 0.95, 1.0]         # white
+    position: [4.5, 2.5, 0.875]
+    zone: obstacle
+    static: true

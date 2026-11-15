@@ -21,10 +21,9 @@ from cat_arena.generate import generate, main
 
 EXPECTED_FILES = (
     "arena.sdf",
-    "terrain.obj",
-    "terrain.mtl",
-    "sand_albedo.png",
-    "terrain_height.png",
+    "height.png",
+    "terrain_visual.obj",
+    "sand_diffuse.png",
     "ground_truth.yaml",
     "markers.yaml",
     "start_pose.yaml",
@@ -57,8 +56,8 @@ def test_generated_world_validates(generated):
 
 def test_world_file_uses_the_generated_mesh(generated):
     text = open(generated.world_path, "r", encoding="utf-8").read()
-    assert "terrain.obj" in text
-    assert os.path.basename(generated.terrain_mesh) == "terrain.obj"
+    assert "terrain_visual.obj" in text
+    assert os.path.basename(generated.terrain_mesh) == "terrain_visual.obj"
     assert os.path.isfile(generated.terrain_mesh)
 
 
@@ -124,9 +123,8 @@ def test_same_seed_reproduces_byte_identical_artifacts(tmp_path, config_path):
     first = generate(seed=11, config_path=config_path, output_dir=str(out),
                      validate=False, verbose=False, include_timestamp=False)
     hashes = {name: _sha256(os.path.join(first.directory, name)) for name in (
-        "arena.sdf", "terrain.obj", "terrain.mtl", "sand_albedo.png",
-        "terrain_height.png", "ground_truth.yaml", "markers.yaml",
-        "start_pose.yaml", "manifest.json",
+        "arena.sdf", "terrain_visual.obj", "height.png", "sand_diffuse.png",
+        "ground_truth.yaml", "markers.yaml", "start_pose.yaml", "manifest.json",
     )}
     second = generate(seed=11, config_path=config_path, output_dir=str(out),
                       validate=False, verbose=False, include_timestamp=False)
@@ -139,7 +137,7 @@ def test_seed_reproducibility_is_independent_of_the_output_directory(tmp_path, c
     """The path-independent artifacts must match across output directories."""
     again = generate(seed=generated.seed, config_path=config_path, output_dir=str(tmp_path),
                      validate=False, verbose=False, include_timestamp=False)
-    for name in ("terrain.obj", "terrain.mtl", "start_pose.yaml", "markers.yaml"):
+    for name in ("terrain_visual.obj", "height.png", "start_pose.yaml", "markers.yaml"):
         first = os.path.join(generated.directory, name)
         second = os.path.join(again.directory, name)
         assert _sha256(first) == _sha256(second), f"{name} is not reproducible"

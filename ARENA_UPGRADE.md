@@ -4,6 +4,54 @@ This document describes the upgrades made to the Caterpillar Autonomy Challenge 
 
 ## Overview of Changes
 
+### PROMPT_SAND.md Arena Appearance Upgrade (Stages A-D) ✅
+**Goal:** Make the arena sand, rocks, craters, markings, props and lighting look like the real
+competition arena (CCTV reference), randomised per seed for vision-detector training.
+**Key design decision:** terrain **collision stays a Gazebo `<heightmap>`**, while the **visual is a
+generated triangle mesh** (`terrain_visual.obj`) because Ogre2/Terra's heightmap renderer unconditionally
+runs the `TerraShadowGenerator` compute shader, which aborts on GL 4.1 devices (Intel iGPU / Mesa D3D12)
+that lack compute-shader support.
+
+**Files:**
+- `src/cat_arena/cat_arena/terrain.py` - Mesh build/OBJ writer, painted sand albedo (tracks, footprints,
+  chalk lines), rock meshes, background PNG
+- `src/cat_arena/cat_arena/sdf.py` - Mesh-visual terrain model, props model, background, fill light
+- `src/cat_arena/cat_arena/config.py` - PropsCfg, light fill fields, appearance parsing
+- `src/cat_arena/cat_arena/generate.py` - Rock meshes, background, props, per-seed lighting in world
+- `src/cat_arena/cat_arena/ground_truth.py` - Props recorded in ground-truth
+- `src/cat_arena/config/arena.yaml` - Arena geometry (unchanged)
+- `src/cat_arena/config/appearance.yaml` - NEW: sand/track/footprint/chalk/rock/crater appearance params
+- `src/cat_arena/config/props.yaml` - NEW: toggleable prop definitions (berm board, boxes, pole)
+- `scripts/gen_sand.py` - NEW: standalone procedural sand appearance generator (--seed, --quality)
+- `scripts/compare_view.py` - NEW: corner CCTV-style render + HSV histogram distance score
+- `scripts/postprocess_image.py` - NEW: camera post-processing (exposure, white balance, noise, blur)
+
+**Stage A — Sand textures + flat terrain mesh + compare_view ✅**
+- Albedo/normal/roughness (256 px light / 1024 px full), base colour #C2AA80, damp/dry patches, grain
+- Flat terrain mesh with CCW winding, full `v/vt/vn` triplets, skirt, `usemtl sand`, MTL side material
+- `compare_view.py`: corner camera (~7.5, 0, 3) → look_at (1.5, 4.5, 0), hfov 62°, 1280x720 render,
+  HSV histograms + distance score vs reference
+
+**Stage B — Tracks, footprints, chalk, rocks, craters (visual + collision), ground truth ✅**
+- Painted track bands with cleat ridges, dark damp footprints, jittered/broken chalk zone lines on albedo
+- Procedural irregular rock meshes per boulder (sphere collision kept; rock-mesh visual, `file://` URI)
+- Craters: negative depressions in visual mesh AND collision heightmap, darker damp floor in albedo
+- Ground truth records props, boulders, craters with position/diameter/depth
+
+**Stage C — Props, walls, background, lighting ✅**
+- Toggleable props (props.yaml): berm board (#E9C21B), white box, yellow-black box, white pole;
+  static, collision + visual, recorded in ground truth
+- Walls: clear panels (alpha 0.35) with black frames
+- Background plane (procedural blurred orange-ground/tent image) behind north wall
+- Directional sun + optional soft fill light for tent-diffused illumination
+
+**Stage D — Randomisation, post-processing, validation ✅**
+- Per-seed lighting variation: sun elevation/azimuth jitter, intensity (0.85-1.15x), tint
+- `postprocess_image.py`: exposure jitter, white-balance jitter, sensor noise, lens blur (deterministic)
+- Verified: `gz sdf -k` valid with zero warnings; headless + GUI spawn clean; ogre2.log clean
+  (no `terminate`/`RenderingAPIException`/compute-shader failures)
+
+---
 ### 1. Heightmap Terrain (Task 1) ✅
 **Files:**
 - `src/cat_arena/cat_arena/terrain.py` - New heightmap generation
@@ -128,11 +176,14 @@ bash tools/capture_dataset.sh --seeds 10 --frames 20 --output ~/cat/dataset --he
 
 ### New/Modified Source Files
 ```
-src/cat_arena/cat_arena/terrain.py          # Heightmap generation (replaces mesh)
-src/cat_arena/cat_arena/sdf.py              # Heightmap SDF model
-src/cat_arena/cat_arena/config.py           # Updated TerrainCfg
-src/cat_arena/cat_arena/generate.py         # Updated generation pipeline
-src/cat_arena/config/arena.yaml             # Heightmap terrain config
+src/cat_arena/cat_arena/terrain.py          # Mesh/OBJ, painted albedo, rock meshes, background PNG
+src/cat_arena/cat_arena/sdf.py              # Mesh-visual terrain, props, background, fill light
+src/cat_arena/cat_arena/config.py           # PropsCfg, light fill fields, appearance parsing
+src/cat_arena/cat_arena/generate.py         # Rocks, background, props, per-seed lighting
+src/cat_arena/cat_arena/ground_truth.py     # Props recorded in ground-truth
+src/cat_arena/config/arena.yaml             # Arena geometry (unchanged)
+src/cat_arena/config/appearance.yaml        # NEW: sand/track/chalk/rock/crater appearance params
+src/cat_arena/config/props.yaml             # NEW: toggleable prop definitions
 src/rover_description/urdf/rover.urdf.xacro # Particle emitters (planned)
 src/rover_description/scripts/dust_controller.py  # Dust controller (planned)
 ```
@@ -145,16 +196,26 @@ tools/make_rocks.py            # Generate rocks SDF
 tools/make_sand.py             # Generate dynamic sand particles SDF
 tools/randomize_world.py       # Domain randomization parameters
 tools/capture_dataset.sh       # Headless dataset capture
+scripts/gen_sand.py            # NEW: standalone procedural sand appearance (--seed, --quality)
+scripts/compare_view.py        # NEW: corner CCTV render + HSV histogram distance score
+scripts/postprocess_image.py   # NEW: camera post-processing (exposure, WB, noise, blur)
+scripts/env_check.py           # Environment pre-flight check
+scripts/render_overview.py     # Headless render/capture reference
 ```
 
 ### Generated Assets (per seed)
 ```
 worlds/seed_N/
 ├── arena.sdf              # Main world file
-├── height.png             # 257x257 heightmap
-├── sand_diffuse.png       # 1024x1024 diffuse texture
-├── sand_normal.png        # 1024x1024 normal map
-├── ground_truth.yaml      # Oracle data
+├── height.png             # 257x257 heightmap (collision)
+├── background.png         # NEW: blurred backdrop beyond walls
+├── terrain_visual.obj     # NEW: triangle-mesh visual (no Terra shader)
+├── terrain.mtl            # NEW: sand / sand_side materials
+├── sand_diffuse.png       # 1024x1024 (light) / 256x256? procedural sand albedo w/ tracks+chalk
+├── sand_normal.png        # 1024x1024 normal map (optional)
+├── rock.mtl               # NEW: rock material palette
+├── rock_boulder_N.obj     # NEW: procedural irregular rock meshes
+├── ground_truth.yaml      # Oracle data (incl. props)
 ├── markers.yaml           # Marker poses
 ├── start_pose.yaml        # Spawn pose
 └── manifest.json          # Generation metadata
@@ -191,6 +252,26 @@ ros2 launch rover_description sim.launch.py seed:=7
 
 # Headless
 ros2 launch rover_description sim.launch.py seed:=7 headless:=true headless_rendering:=true
+```
+
+### Procedural sand appearance (gen_sand)
+```bash
+# light quality (256 px textures, fast)
+ros2 run cat_arena gen_sand.py --seed 7 --quality light --output-dir /tmp/sand7
+# full quality (1024 px textures)
+ros2 run cat_arena gen_sand.py --seed 7 --quality full --output-dir /tmp/sand7_full
+```
+
+### Corner CCTV render + comparison (compare_view)
+```bash
+ros2 run cat_arena compare_view.py --seed 7 --quality light --out /tmp/arena_view_7.png
+```
+
+### Camera post-processing for training images (postprocess_image)
+```bash
+ros2 run cat_arena postprocess_image.py \
+    --input /tmp/arena_view_7.png --output /tmp/arena_view_7_noisy.png --seed 7 \
+    --exposure 0.1 --wb 0.05 --noise 0.02 --blur 1.2
 ```
 
 ### Night World (Planned)

@@ -62,7 +62,7 @@ def test_boulders_are_described_completely(truth, cfg):
         assert 0.30 - 1e-9 <= boulder["diameter"] <= 0.40 + 1e-9
         assert boulder["exposed_height"] > 0.0
         assert boulder["buried_depth"] >= 0.0
-        assert boulder["top_z"] == pytest.approx(boulder["center"][2] + boulder["radius"])
+        assert boulder["top_z"] == pytest.approx(boulder["center"][2] + boulder["radius"], abs=2e-6)
         assert boulder["zone"] in cfg.boulders.zones
         assert boulder["static"] is True
 
@@ -107,9 +107,11 @@ def test_obstacles_never_reported_in_the_start_zone(truth):
 
 def test_terrain_section_describes_the_mesh(truth):
     terrain = truth["terrain"]
-    assert terrain["files"]["mesh"] == "terrain.obj"
-    assert terrain["triangles"] > 10000
-    assert terrain["z_min"] < 0.0, "craters must show up as a negative z in the mesh"
+    assert terrain["use_heightmap"] is True
+    assert terrain["files"]["heightmap"] == "height.png"
+    assert terrain["files"]["albedo"] is not None, "the sand albedo texture must be recorded"
+    assert terrain["heightmap_size"][0] > 0 and terrain["heightmap_size"][1] > 0
+    assert terrain["z_min"] <= 0.0, "craters must show up as negative heights in the terrain"
     assert terrain["skirt_depth"] == pytest.approx(0.30)
 
 

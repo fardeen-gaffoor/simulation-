@@ -1,0 +1,50 @@
+# =============================================================================
+# rover_description / config / cameras.yaml
+#
+# Stage 1 of PROMPT_ROVER_SIM.md: camera layout, every value tagged
+# ``given`` or ``assumed``.  All poses are placeholders (layout not decided).
+# Cameras: plain RGB only, 4 of them, no depth (competition rule).
+# =============================================================================
+
+schema_version: 1
+
+meta:
+  source: "PROMPT_ROVER_SIM.md Stage 1 (camera layout)"
+  note: "All camera poses are placeholders - layout not decided."
+
+preset:
+  default: "A"                                          # given - "Default preset A"
+  image_format: "RGB"                                   # given - "plain RGB only"
+  resolution: [1280, 720]                               # given
+  update_rate_hz: 10.0                                  # given
+  low_res_option: true                                  # assumed - for headless/fast tests
+
+cameras:
+  cam_front:
+    mount: "on a mast near the front, high"
+    tilt_down_deg: 18.0                                 # given - "tilted down 18 degrees"
+    lens_deg: 100.0                                     # given - "wide lens (about 100 degrees)"
+    placeholder: true                                   # given - layout not decided
+    role: "front navigation, high, ~100 deg wide, tilted down 18 deg"
+  cam_rear:
+    mount: "rear, level"
+    hfov_deg: 77.0                                      # given - "about 77 degrees"
+    placeholder: true                                   # given - layout not decided
+    role: "rear view, level"
+  cam_belt:
+    mount: "aimed at the conveyor and tub"
+    placeholder: true                                   # given - layout not decided
+    role: "conveyor and tub view"
+  cam_dump:
+    mount: "aimed at the funnel and ground below it"
+    placeholder: true                                   # given - layout not decided
+    role: "funnel and ground-below view"
+
+preset_b:
+  name: "no cameras"
+  purpose: "fast physics tests"                         # assumed
+  enabled: false                                        # assumed
+
+tof_sensors:
+  count: 3                                              # assumed - "3, forward and down"
+  enabled: false                                        # assumed - "disabled by default"

@@ -1,0 +1,23 @@
+# =============================================================================
+# rover_description / config / battery.yaml
+#
+# Stage 1 of PROMPT_ROVER_SIM.md: battery parameters, every value tagged
+# ``given`` or ``assumed``.  Chemistry is unknown and treated as a parameter.
+# =============================================================================
+
+schema_version: 1
+
+meta:
+  source: "PROMPT_ROVER_SIM.md Stage 1 (battery spec)"
+
+electrical:
+  voltage_nominal_v:   {value: 12.0,  tag: "given",   comment: "nominal pack voltage"}
+  capacity_mah:        {value: 30000, tag: "given",   comment: "30000 mAh"}
+  capacity_wh:         {value: 360.0, tag: "derived", comment: "12 V x 30 Ah = 360 Wh nominal"}
+  voltage_cutoff_v:    {value: 10.0,  tag: "assumed", comment: "assumed cutoff voltage"}
+  internal_resistance_ohm: {value: 0.05, tag: "assumed", comment: "assumed internal resistance"}
+  chemistry:           {value: "unknown", tag: "given", comment: "chemistry unknown - treat as parameter"}
+
+pwm:
+  duty_cap:            {value: 1.0,   tag: "assumed", comment: "PWM duty cap, default 1.0"}
+  duty_cap_14_6v:      {value: 0.82,  tag: "assumed", comment: "offer 0.82 for a 14.6 V full pack"}

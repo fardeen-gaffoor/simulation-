@@ -1,0 +1,48 @@
+# =============================================================================
+# rover_description / config / motors.yaml
+#
+# Stage 1 of PROMPT_ROVER_SIM.md: drive motor parameters, every value tagged
+# ``given`` (from the listing) or ``assumed`` (engineering choice, flagged).
+#
+# Honesty rule: the listing's gearbox breaks at 100 kg.cm, so the 125 kg.cm
+# stall-torque requirement is NOT met by this motor - reported plainly.
+# Conversion: 1 kg.cm = 0.0980665 N.m.
+# =============================================================================
+
+schema_version: 1
+
+meta:
+  motor_model: "Robokites Rhino"
+  source: "PROMPT_ROVER_SIM.md Stage 1 (motor listing)"
+
+electrical:
+  voltage_nominal_v:   {value: 12.0,  tag: "given",   comment: "nominal supply voltage"}
+  no_load_current_a:   {value: 0.8,   tag: "given",   comment: "no-load current"}
+  load_current_advised_a: {value: 7.5, tag: "given",  comment: "current at 75 kg.cm (advised max)"}
+  stall_current_a:     {value: 20.0,  tag: "assumed", comment: "NOT given - assumed, flagged"}
+
+mechanical:
+  no_load_output_rpm:   {value: 60.0,  tag: "given",   comment: "no-load output speed"}
+  base_motor_rpm:       {value: 18000, tag: "given",   comment: "18000 rpm base motor"}
+  gearbox_stages:       {value: 4,     tag: "given",   comment: "4-stage metal planetary"}
+  shaft_diameter_mm:    {value: 6.0,   tag: "given",   comment: "6 mm D-type shaft"}
+  gearbox_diameter_mm:  {value: 32.0,  tag: "given",   comment: "gearbox diameter"}
+  motor_weight_kg:      {value: 0.30,  tag: "given",   comment: "300 g per listing"}
+
+torque_kgcm:
+  rated_torque_kgcm:        {value: 40.0,  tag: "given",   comment: "continuous, at best efficiency"}
+  advised_max_torque_kgcm:  {value: 75.0,  tag: "given",   comment: "advised maximum"}
+  gearbox_breaking_torque_kgcm: {value: 100.0, tag: "given", comment: "gearbox breaks at this torque"}
+  stall_torque_max_kgcm:    {value: 75.0,  tag: "given",   comment: "not to exceed 75 kg.cm"}
+  stall_torque_requirement_kgcm: {value: 125.0, tag: "given", comment: "requirement - NOT MET by this motor"}
+  steady_torque_requirement_kgcm: {value: 40.0, tag: "given", comment: "steady torque requirement"}
+  speed_requirement_rpm:    {value: 60.0,  tag: "given",   comment: "60 rpm requirement"}
+  speed_requirement_mps:    {value: 0.5,   tag: "given",   comment: "0.5 m/s target speed"}
+
+conversion:
+  kgcm_to_nm: {value: 0.0980665, tag: "given", comment: "1 kg.cm = 0.0980665 N.m"}
+
+drivetrain:
+  chain_ratio:   {value: 1.0,   tag: "assumed", comment: "parameter, default 1.0, sweep 1.0 to 2.0"}
+  chain_efficiency: {value: 0.95, tag: "assumed", comment: "chain drive efficiency"}
+  encoder_cpr: {value: 12532, tag: "given", comment: "counts per output revolution - confirm 4x decoding"}

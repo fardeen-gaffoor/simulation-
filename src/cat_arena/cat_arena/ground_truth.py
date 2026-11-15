@@ -89,7 +89,10 @@ def build_ground_truth(
     ]
     albedo = terrain_stats.get("diffuse") if isinstance(terrain_stats.get("diffuse"), dict) else None
     normal_map = terrain_stats.get("normal") if isinstance(terrain_stats.get("normal"), dict) else None
-    heightmap = terrain_stats.get("heightmap") if isinstance(terrain_stats.get("heightmap"), dict) else None
+    heightmap_stats = (
+        terrain_stats if isinstance(terrain_stats, dict) and "rows" in terrain_stats else terrain_stats.get("heightmap")
+    )
+    heightmap = heightmap_stats if isinstance(heightmap_stats, dict) else None
 
     rules = {
         "boulder_count_ok": len(boulders) >= 3,
@@ -161,6 +164,18 @@ def build_ground_truth(
         },
         "craters": craters,
         "boulders": boulders,
+        "props": [
+            {
+                "id": name,
+                "enabled": bool(getattr(cfg.props, name).enabled),
+                "shape": getattr(cfg.props, name).shape,
+                "color": list(getattr(cfg.props, name).color),
+                "position": list(getattr(cfg.props, name).position),
+                "zone": getattr(cfg.props, name).zone,
+                "static": getattr(cfg.props, name).static,
+            }
+            for name in ("berm_board", "small_white_box", "yellow_black_box", "white_pole")
+        ],
         "start_pose": start_pose.to_dict(),
         "markers": {
             "family": cfg.markers.family,

@@ -6,10 +6,12 @@ the same seed produces a byte-identical file.
 Geometry choices that were *verified* on this machine before being committed
 (see README "verified facts"):
 
-* the terrain is a triangle **mesh** for visual *and* collision - the mesh-based
-  heightmap collision path silently produced a flat surface on gz-sim 8.15.0,
-* DART needs ``<collision_detector>bullet</collision_detector>`` for a
-  triangle-mesh terrain,
+* the terrain collision is a Gazebo **heightmap** (DART/Bullet heightfield),
+  while the visual is a generated triangle mesh - Ogre2's Terra heightmap
+  renderer runs a compute shader that cannot compile on GL 4.1 devices such
+  as Intel iGPUs under Mesa D3D12, which aborts the GUI,
+* the former all-mesh terrain silently produced a flat collision surface on
+  gz-sim 8.15.0, so collision stays on the heightmap path,
 * every marking/board is visual-only (``<visual>`` without ``<collision>``) so
   the robot can drive over the painted zones,
 * zone outline strips are drawn *inside* their own zone rectangle, which avoids
@@ -21,10 +23,10 @@ from __future__ import annotations
 import hashlib
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from .config import ArenaConfig, Rect
+from .config import ArenaConfig, LightCfg, PropsCfg, Rect
 from .obstacles import Boulder
 from .terrain import Crater
 
@@ -46,6 +48,9 @@ class WorldAssets:
     mtl_file: Optional[str] = None
     albedo_file: Optional[str] = None
     normal_file: Optional[str] = None
+    visual_mesh_file: Optional[str] = None
+    rock_meshes: Dict[str, str] = field(default_factory=dict)
+    background_file: Optional[str] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -192,6 +197,31 @@ def _file_uri(path: str) -> str:
     return "file://" + os.path.abspath(path)
 
 
+def _texture_dir() -> Optional[str]:
+    """Locate the cat_arena ``assets/textures`` directory.
+
+    Tries the installed share directory first, then the source tree next to
+    this module.  The visual mesh uses these as its PBR albedo/normal maps so
+    the sand appearance is stable across generated worlds.
+    """
+    candidates = []
+    try:
+        from ament_index_python.packages import get_package_share_directory
+
+        candidates.append(
+            os.path.join(get_package_share_directory("cat_arena"), "assets", "textures")
+        )
+    except Exception:
+        pass
+    candidates.append(
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "textures")
+    )
+    for candidate in candidates:
+        if os.path.isfile(os.path.join(candidate, "terrain_diffuse.png")):
+            return candidate
+    return None
+
+
 def _comment_safe(text: object) -> str:
     """Make dynamic text safe inside an XML comment.
 
@@ -206,7 +236,14 @@ def _comment_safe(text: object) -> str:
 # section builders
 # --------------------------------------------------------------------------- #
 def _terrain_model(cfg: ArenaConfig, assets: WorldAssets, output_dir: str) -> str:
-    """Generate heightmap terrain model for Gazebo."""
+    """Generate terrain: heightmap collision + mesh visual.
+
+    The collision shape stays a Gazebo ``<heightmap>``.  The visual is a plain
+    mesh because Ogre2/Terra's heightmap renderer always runs the
+    ``TerraShadowGenerator`` compute shader, which cannot compile on GL 4.1
+    devices (for example Intel iGPUs under Mesa D3D12) where compute shaders
+    are unavailable.  A mesh visual avoids the Terra shader path entirely.
+    """
     hm_uri = _file_uri(os.path.join(output_dir, assets.heightmap_file))
     r, g, b = cfg.sand_color[:3]
     mu, mu2 = cfg.terrain.friction.mu, cfg.terrain.friction.mu2
@@ -217,9 +254,21 @@ def _terrain_model(cfg: ArenaConfig, assets: WorldAssets, output_dir: str) -> st
     pos_y = size_y / 2.0
     pos_z = size_z / 2.0
 
-    # Build material with PBR textures
-    if assets.albedo_file:
+    # Build the sand material.  Prefer the stable package textures, falling
+    # back to the per-world procedural albedo when they are not installed.
+    texture_dir = _texture_dir()
+    albedo_uri: Optional[str] = None
+    normal_uri: Optional[str] = None
+    if texture_dir:
+        albedo_uri = _file_uri(os.path.join(texture_dir, "terrain_diffuse.png"))
+        normal_uri = _file_uri(os.path.join(texture_dir, "terrain_normal.png"))
+    elif assets.albedo_file:
         albedo_uri = _file_uri(os.path.join(output_dir, assets.albedo_file))
+        if assets.normal_file:
+            normal_uri = _file_uri(os.path.join(output_dir, assets.normal_file))
+
+    if albedo_uri:
+        normal_line = f"              <normal_map>{normal_uri}</normal_map>\n" if normal_uri else ""
         material = (
             "<material>\n"
             f"          <ambient>{r * 0.55:.4f} {g * 0.55:.4f} {b * 0.55:.4f} 1</ambient>\n"
@@ -228,20 +277,48 @@ def _terrain_model(cfg: ArenaConfig, assets: WorldAssets, output_dir: str) -> st
             "          <pbr>\n"
             "            <metal>\n"
             f"              <albedo_map>{albedo_uri}</albedo_map>\n"
-            "              <roughness>0.92</roughness>\n"
+            + normal_line
+            + "              <roughness>0.92</roughness>\n"
             "              <metalness>0.0</metalness>\n"
             "            </metal>\n"
             "          </pbr>\n"
             "        </material>"
         )
-        if assets.normal_file:
-            normal_uri = _file_uri(os.path.join(output_dir, assets.normal_file))
-            material = material.replace(
-                "              <metalness>0.0</metalness>",
-                f"              <normal_map>{normal_uri}</normal_map>\n              <metalness>0.0</metalness>"
-            )
     else:
         material = _color(cfg.sand_color, specular=0.05)
+
+    if assets.visual_mesh_file:
+        visual_uri = _file_uri(os.path.join(output_dir, assets.visual_mesh_file))
+        visual = f"""        <visual name="terrain_visual">
+          <pose>0 0 0 0 0 0</pose>
+          <geometry>
+            <mesh>
+              <uri>{visual_uri}</uri>
+              <scale>1 1 1</scale>
+            </mesh>
+          </geometry>
+          {material}
+        </visual>"""
+    else:
+        # Fallback for older generated directories: textured visual heightmap.
+        heightmap_texture = ""
+        if albedo_uri:
+            heightmap_texture = (
+                "              <texture>\n"
+                "                <size>10</size>\n"
+                f"                <diffuse>{albedo_uri}</diffuse>\n"
+                + (f"                <normal>{normal_uri}</normal>\n" if normal_uri else "")
+                + "              </texture>\n"
+            )
+        visual = f"""        <visual name="terrain_visual">
+          <geometry>
+            <heightmap>
+              <uri>{hm_uri}</uri>
+              <size>{size_x:.6f} {size_y:.6f} {size_z:.6f}</size>
+              <pos>0 0 0</pos>
+{heightmap_texture}            </heightmap>
+          </geometry>
+        </visual>"""
 
     return f"""    <!-- ==================== heightmap terrain (sand) ==================== -->
     <model name="terrain">
@@ -258,15 +335,7 @@ def _terrain_model(cfg: ArenaConfig, assets: WorldAssets, output_dir: str) -> st
           </geometry>
           {_surface(mu, mu2, soft_contact=True)}
         </collision>
-        <visual name="terrain_visual">
-          <geometry>
-            <heightmap>
-              <uri>{hm_uri}</uri>
-              <size>{size_x:.6f} {size_y:.6f} {size_z:.6f}</size>
-              <pos>0 0 0</pos>
-            </heightmap>
-          </geometry>
-        </visual>
+{visual}
       </link>
     </model>"""
 
@@ -286,6 +355,58 @@ def _walls_model(cfg: ArenaConfig) -> str:
         ("east_wall", (L + 0.5 * t, 0.5 * W, 0.5 * h), (t, W, h)),
     ]
     for name, pos, size in specs:
+        sx, sy, sz = size
+        clear_color = (cfg.walls.color[0], cfg.walls.color[1], cfg.walls.color[2], 0.35)
+        frame_color = (0.08, 0.08, 0.10, 1.0)          # black frames
+        ft = 0.02                                        # frame thickness
+        panel = (
+            f"          <visual name=\"{name}_panel\">\n"
+            f"            <geometry>\n"
+            f"               <box>\n"
+            f"                 <size>{sx:.6f} {sy:.6f} {sz:.6f}</size>\n"
+            f"               </box>\n"
+            f"            </geometry>\n"
+            f"            {_color(clear_color, specular=0.05)}\n"
+            f"          </visual>"
+        )
+        frame = (
+            f"          <visual name=\"{name}_frame_top\">\n"
+            f"            <pose>0 {sy/2 - ft/2:.6f} 0 0 0 0</pose>\n"
+            f"            <geometry>\n"
+            f"               <box>\n"
+            f"                 <size>{sx:.6f} {ft:.6f} {sz:.6f}</size>\n"
+            f"               </box>\n"
+            f"            </geometry>\n"
+            f"            {_color(frame_color, specular=0.05)}\n"
+            f"          </visual>\n"
+            f"          <visual name=\"{name}_frame_bottom\">\n"
+            f"            <pose>0 {-sy/2 + ft/2:.6f} 0 0 0 0</pose>\n"
+            f"            <geometry>\n"
+            f"               <box>\n"
+            f"                 <size>{sx:.6f} {ft:.6f} {sz:.6f}</size>\n"
+            f"               </box>\n"
+            f"            </geometry>\n"
+            f"            {_color(frame_color, specular=0.05)}\n"
+            f"          </visual>\n"
+            f"          <visual name=\"{name}_frame_left\">\n"
+            f"            <pose>{-sx/2 + ft/2:.6f} 0 0 0 0 0</pose>\n"
+            f"            <geometry>\n"
+            f"               <box>\n"
+            f"                 <size>{ft:.6f} {sy:.6f} {sz:.6f}</size>\n"
+            f"               </box>\n"
+            f"            </geometry>\n"
+            f"            {_color(frame_color, specular=0.05)}\n"
+            f"          </visual>\n"
+            f"          <visual name=\"{name}_frame_right\">\n"
+            f"            <pose>{sx/2 - ft/2:.6f} 0 0 0 0 0</pose>\n"
+            f"            <geometry>\n"
+            f"               <box>\n"
+            f"                 <size>{ft:.6f} {sy:.6f} {sz:.6f}</size>\n"
+            f"               </box>\n"
+            f"            </geometry>\n"
+            f"            {_color(frame_color, specular=0.05)}\n"
+            f"          </visual>"
+        )
         links.append(
             f"""      <link name="{name}">
         <pose>{_pose(pos[0], pos[1], pos[2])}</pose>
@@ -297,14 +418,8 @@ def _walls_model(cfg: ArenaConfig) -> str:
           </geometry>
           {_surface(mu, mu2)}
         </collision>
-        <visual name="{name}_visual">
-          <geometry>
-            <box>
-              <size>{size[0]:.6f} {size[1]:.6f} {size[2]:.6f}</size>
-            </box>
-          </geometry>
-          {color}
-        </visual>
+        {panel}
+        {frame}
       </link>"""
         )
     return (
@@ -315,9 +430,9 @@ def _walls_model(cfg: ArenaConfig) -> str:
         + "\n".join(links)
         + "\n    </model>"
     )
-
-
 def _zone_markings_model(cfg: ArenaConfig) -> str:
+    """Stage C: zone markings (VISUAL ONLY, no collision)."""
+
     visuals: List[str] = []
     width = cfg.marking.width
     thickness = cfg.marking.thickness
@@ -417,9 +532,10 @@ def _markers_model(cfg: ArenaConfig) -> str:
     )
 
 
-def _boulders_models(cfg: ArenaConfig, boulders: Sequence[Boulder]) -> str:
+def _boulders_models(cfg: ArenaConfig, boulders: Sequence[Boulder], rock_meshes: Optional[Dict[str, str]] = None) -> str:
     if not boulders:
         return "    <!-- no boulders this run -->"
+    rock_meshes = rock_meshes or {}
     mu, mu2 = cfg.friction.mu, cfg.friction.mu2
     blocks: List[str] = []
     for boulder in boulders:
@@ -432,6 +548,27 @@ def _boulders_models(cfg: ArenaConfig, boulders: Sequence[Boulder]) -> str:
             min(1.0, b * shade),
             a,
         )
+        rock_mesh = rock_meshes.get(boulder.boulder_id)
+        if rock_mesh:
+            # Irregular procedural rock mesh for visual; sphere stays for
+            # collision (DART triangle-mesh collision is fine, but the sphere
+            # keeps the boulder fully predictable for the rover footprint).
+            visual_geom = (
+                "<geometry>\n"
+                "              <mesh>\n"
+                f"                <uri>{_file_uri(rock_mesh)}</uri>\n"
+                "                <scale>1 1 1</scale>\n"
+                "              </mesh>\n"
+                "            </geometry>"
+            )
+        else:
+            visual_geom = (
+                "<geometry>\n"
+                f"              <sphere>\n"
+                f"                <radius>{boulder.radius:.6f}</radius>\n"
+                "              </sphere>\n"
+                "            </geometry>"
+            )
         blocks.append(
             f"""    <model name="{boulder.boulder_id}">
       <static>{str(cfg.boulders.static).lower()}</static>
@@ -446,11 +583,7 @@ def _boulders_models(cfg: ArenaConfig, boulders: Sequence[Boulder]) -> str:
           {_surface(mu, mu2)}
         </collision>
         <visual name="visual">
-          <geometry>
-            <sphere>
-              <radius>{boulder.radius:.6f}</radius>
-            </sphere>
-          </geometry>
+          {visual_geom}
           {_color(color, specular=0.08)}
         </visual>
       </link>
@@ -459,6 +592,162 @@ def _boulders_models(cfg: ArenaConfig, boulders: Sequence[Boulder]) -> str:
     return (
         "    <!-- ============ seeded boulders (static: must not be moved) ============ -->\n"
         + "\n".join(blocks)
+    )
+
+
+def _props_model(props_cfg: PropsCfg) -> str:
+    """Stage C: static arena props (boards, boxes, pole).
+
+    Every prop is a static model with both collision and visual geometry so it
+    behaves as a fixed obstacle while looking like the reference arena.
+    Disabled props are omitted entirely.
+    """
+    if not props_cfg.enabled:
+        return "    <!-- arena props disabled by configuration -->"
+
+    def _box_geom(size: Sequence[float]) -> str:
+        sx, sy, sz = size
+        return (
+            "   <box>\n"
+            f"     <size>{sx:.6f} {sy:.6f} {sz:.6f}</size>\n"
+            "   </box>\n"
+        )
+
+    def _cyl_geom(radius: float, length: float) -> str:
+        return (
+            "  <cylinder>\n"
+            f"    <radius>{radius:.6f}</radius>\n"
+            f"    <length>{length:.6f}</length>\n"
+            "  </cylinder>\n"
+        )
+
+    def _mat(rgba: Sequence[float], specular: float = 0.15) -> str:
+        r, g, b, a = rgba
+        return (
+            "<material>\n"
+            f"          <ambient>{r * 0.6:.4f} {g * 0.6:.4f} {b * 0.6:.4f} {a:.4f}</ambient>\n"
+            f"          <diffuse>{r:.4f} {g:.4f} {b:.4f} {a:.4f}</diffuse>\n"
+            f"          <specular>{specular:.4f} {specular:.4f} {specular:.4f} {a:.4f}</specular>\n"
+            f"        </material>"
+        )
+
+    blocks: List[str] = []
+    props = [
+        ("berm_board", props_cfg.berm_board),
+        ("small_white_box", props_cfg.small_white_box),
+        ("yellow_black_box", props_cfg.yellow_black_box),
+        ("white_pole", props_cfg.white_pole),
+    ]
+    for name, p in props:
+        if not p.enabled:
+            continue
+        x, y, z = p.position
+        blocks.append(
+            f"""    <model name="prop_{name}">
+      <static>{str(p.static).lower()}</static>
+      <pose>{_pose(x, y, z)}</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+"""
+        )
+        if p.shape == "box":
+            blocks.append(f"                {_box_geom(p.size)}\n")
+        else:
+            blocks.append(f"                {_cyl_geom(p.radius, p.height)}\n")
+        blocks.append(
+            """              </geometry>
+          {_surface(0.9, 0.9)}
+        </collision>
+        <visual name="visual">
+          <geometry>
+"""
+        )
+        if p.shape == "box":
+            blocks.append(f"                {_box_geom(p.size)}\n")
+        else:
+            blocks.append(f"                {_cyl_geom(p.radius, p.height)}\n")
+        blocks.append("              </geometry>\n")
+        blocks.append(f"          {_mat(p.color)}\n")
+
+        # yellow-and-black box gets a black stripe across its front face (sibling visual)
+        stripe_visual = ""
+        if name == "yellow_black_box" and p.stripe_color is not None and p.size is not None:
+            sx, sy, sz = p.size
+            stripe_visual = f"""          <visual name="stripe">
+            <pose>{0.0:.6f} {sy/2.0 + 0.001:.6f} {sz*0.5:.6f} 0 0 0</pose>
+            <geometry>
+               
+               
+
+                 \n
+                 <box>
+                  <size>{sx*0.9:.6f} {0.02:.6f} {sz*0.5:.6f}</size>
+                 </box>\n
+                 \n
+
+                 
+
+               
+            </geometry>
+            {_mat(p.stripe_color, specular=0.05)}
+          </visual>
+"""
+        blocks.append("        </visual>\n")
+        if stripe_visual:
+            blocks.append(stripe_visual)
+        blocks.append("      </link>\n    </model>\n")
+
+    return (
+        "    <!-- ============ arena props (Stage C: boards, boxes, pole) ============ -->\n"
+        + "\n".join(blocks)
+    )
+
+
+def _fill_light_model(light_cfg: LightCfg) -> str:
+    """Stage C: optional soft fill light for tent-diffused illumination."""
+    if not light_cfg.fill_enabled:
+        return ""
+    return (
+        f"    <light type=\"directional\" name=\"{light_cfg.name}_fill\">\n"
+        f"      <cast_shadows>false</cast_shadows>\n"
+        f"      <pose>{_v6(light_cfg.fill_pose)}</pose>\n"
+        f"      <diffuse>{_v4(light_cfg.fill_diffuse)}</diffuse>\n"
+        f"      <specular>{_v4(light_cfg.fill_specular)}</specular>\n"
+        f"      <direction>{_v3(light_cfg.direction)}</direction>\n"
+        f"    </light>"
+    )
+
+
+def _background_model(cfg: ArenaConfig, assets: WorldAssets) -> str:
+    """Stage C: blurred backdrop plane behind the walls (tent / crowd / orange ground).
+
+    A single tall plane sits just behind the north wall so it is visible through
+    the clear wall panels.  Falls back to a plain diffuse plane when no
+    background image is available.
+    """
+    L, W, h = cfg.length_x, cfg.width_y, cfg.walls.height
+    back_y = W + 0.5 * cfg.walls.thickness + 0.05
+    back_z = 0.5 * max(h, 2.0)
+    back_h = max(h, 2.0)
+    back_w = L + 2.0 * cfg.walls.thickness + 2.0
+    material = f"          {_color(cfg.scene.background, specular=0.05)}\n"
+    return (
+        f"    <!-- ============ blurred backdrop beyond the walls ============ -->\n"
+        f'    <model name="arena_background">\n'
+        f"      <static>true</static>\n"
+        f"      <pose>{0.5 * L:.6f} {back_y:.6f} {back_z:.6f} 0 0 0</pose>\n"
+        f"      <link name=\"link\">\n"
+        f"        <visual name=\"backdrop\">\n"
+        f"          <geometry>\n"
+        f"            <box>\n"
+        f"              <size>{back_w:.6f} {0.05:.6f} {back_h:.6f}</size>\n"
+        f"            </box>\n"
+        f"          </geometry>\n"
+        f"{material}"
+        f"        </visual>\n"
+        f"      </link>\n"
+        f"    </model>"
     )
 
 
@@ -506,8 +795,10 @@ def build_world_sdf(
     seed: int = 0,
     include_overview_camera: Optional[bool] = None,
     include_robot_plugins: Optional[bool] = None,
+    light_cfg: Optional[LightCfg] = None,
 ) -> str:
     """Render the complete world description for one seeded run."""
+    light_cfg = light_cfg or cfg.light
     ov_enabled = cfg.overview_camera.enabled if include_overview_camera is None else bool(include_overview_camera)
     # A robot that carries cameras / an IMU needs those systems present in the
     # *world*: gz-sim-sensors-system renders cameras and gz-sim-imu-system
@@ -579,19 +870,22 @@ def build_world_sdf(
       <origin_visual>{'true' if cfg.scene.origin_visual else 'false'}</origin_visual>
     </scene>
 
-    <light type="directional" name="{cfg.light.name}">
-      <cast_shadows>{'true' if cfg.light.cast_shadows else 'false'}</cast_shadows>
-      <pose>{_v6(cfg.light.pose)}</pose>
-      <diffuse>{_v4(cfg.light.diffuse)}</diffuse>
-      <specular>{_v4(cfg.light.specular)}</specular>
+    <light type="directional" name="{light_cfg.name}">
+      <cast_shadows>{'true' if light_cfg.cast_shadows else 'false'}</cast_shadows>
+      <pose>{_v6(light_cfg.pose)}</pose>
+      <diffuse>{_v4(light_cfg.diffuse)}</diffuse>
+      <specular>{_v4(light_cfg.specular)}</specular>
       <attenuation>
-        <range>{cfg.light.attenuation[0]:g}</range>
-        <constant>{cfg.light.attenuation[1]:g}</constant>
-        <linear>{cfg.light.attenuation[2]:g}</linear>
-        <quadratic>{cfg.light.attenuation[3]:g}</quadratic>
+        <range>{light_cfg.attenuation[0]:g}</range>
+        <constant>{light_cfg.attenuation[1]:g}</constant>
+        <linear>{light_cfg.attenuation[2]:g}</linear>
+        <quadratic>{light_cfg.attenuation[3]:g}</quadratic>
       </attenuation>
-      <direction>{_v3(cfg.light.direction)}</direction>
+      <direction>{_v3(light_cfg.direction)}</direction>
     </light>
+
+    <!-- Stage C: soft fill light to mimic tent-diffused illumination. -->
+{_fill_light_model(light_cfg)}
 
     <!-- No <gui> block on purpose. A world-level <gui> element REPLACES
          Gazebo's default GUI plugin list (gz-sim8/gui/gui.config) instead of
@@ -607,11 +901,15 @@ def build_world_sdf(
 
 {_walls_model(cfg)}
 
+{_background_model(cfg, assets)}
+
 {_zone_markings_model(cfg)}
 
 {_markers_model(cfg)}
 
-{_boulders_models(cfg, boulders)}
+{_boulders_models(cfg, boulders, assets.rock_meshes)}
+
+{_props_model(cfg.props)}
 
 {_overview_camera_model(cfg, ov_enabled)}
   </world>

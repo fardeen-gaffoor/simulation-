@@ -69,8 +69,10 @@ drive:
   max_wheel_acceleration: 3.0   # m/s^2, smooths starts on soft ground
   wheel_color: [0.12, 0.12, 0.13, 1.0]
   hub_color: [0.65, 0.65, 0.68, 1.0]
-  wheel_mu: 0.85        # sand: loose sand means slip under a pulling load
-  wheel_mu2: 0.85
+  wheel_mu: 0.85        # sand: longitudinal wheel-ground friction
+  wheel_mu2: 0.55       # sand: lateral wheel-ground friction (lower than longitudinal, so skid-steer turns are possible)
+  # Skid-steer controller parameters
+  skid_steer_effective_track_correction: 2.0  # assumed: effective track = track * this factor
 
 # -----------------------------------------------------------------------------
 # Excavation: ladder (chain+buckets) on a pitch joint, belt (conveyor roller),

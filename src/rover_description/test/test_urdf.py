@@ -63,7 +63,14 @@ def test_imu_present_and_has_no_magnetometer(urdf_root):
 
 def test_gz_plugins(urdf_root):
     plugins = [f"{e.get('filename')} {e.get('name')}" for e in urdf_root.iter("plugin")]
-    assert any("diff-drive" in p for p in plugins)
+    # Stage 2: four per-wheel joint controllers replace the single diff-drive.
+    wheel_controller_names = []
+    for e in urdf_root.iter("plugin"):
+        if e.get("name") == "gz::sim::systems::JointController":
+            jn = e.find("joint_name")
+            if jn is not None and jn.text and jn.text.startswith("wheel_"):
+                wheel_controller_names.append(jn.text)
+    assert len(wheel_controller_names) == 4, f"expected 4 wheel controllers, found {len(wheel_controller_names)}"
     assert any("joint-state-publisher" in p for p in plugins)
 
 
@@ -99,12 +106,24 @@ def test_excavation_joint_controllers_use_a_global_topic(urdf_root):
         assert plugin.find("topic") is not None, f"{name} must name the global topic"
 
 
-def test_diff_drive_joints(urdf_root):
-    plugin = next(e for e in urdf_root.iter("plugin") if "diff-drive" in (e.get("filename") or ""))
-    left = [e.text for e in plugin.findall("left_joint")]
-    right = [e.text for e in plugin.findall("right_joint")]
-    assert left == ["wheel_front_left_joint", "wheel_rear_left_joint"]
-    assert right == ["wheel_front_right_joint", "wheel_rear_right_joint"]
+def test_wheel_joint_controllers(urdf_root):
+    """Each wheel has a velocity-mode joint controller on its cmd_vel topic."""
+    matches = {}
+    for e in urdf_root.iter("plugin"):
+        if e.get("name") == "gz::sim::systems::JointController":
+            jn = e.find("joint_name")
+            if jn is not None and jn.text and jn.text.endswith("_joint"):
+                wheel = jn.text.replace("_joint", "")
+                matches[wheel] = e
+    for wheel in ("wheel_front_left", "wheel_front_right",
+                  "wheel_rear_left", "wheel_rear_right"):
+        assert wheel in matches, f"wheel {wheel} missing joint controller"
+        m = matches[wheel]
+        topic = m.find("topic").text
+        assert topic == f"/wheel/{wheel}/cmd_vel", f"wrong topic {topic}"
+        assert m.find("use_force_commands").text == "false"
+        assert m.find("cmd_max") is not None
+        assert m.find("cmd_min") is not None
 
 
 def test_wheel_joints_continuous(urdf_root):

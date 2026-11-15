@@ -27,6 +27,8 @@ import shutil
 import subprocess
 import sys
 import time
+
+import numpy as np
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -40,13 +42,18 @@ from .markers import markers_yaml_document
 from .obstacles import ObstacleLayout, place_obstacles
 from .seeding import resolve_master_seed, rng_numpy
 from .sdf import WorldAssets, build_world_sdf
+from dataclasses import replace
 from .start_pose import StartPose, sample_start_pose
 from .terrain import (
     Crater,
     TerrainField,
     build_heightmap,
+    build_mesh,
     write_heightmap_png,
+    write_obj_mesh,
     write_sand_textures,
+    write_rock_meshes,
+    write_background_png,
 )
 
 __all__ = ["GenerationResult", "GenerationError", "generate", "main"]
@@ -77,7 +84,10 @@ class GenerationResult:
 
     @property
     def terrain_mesh(self) -> str:
-        return os.path.join(self.directory, str(self.terrain_stats.get("obj", "terrain.obj")))
+        stats = self.terrain_stats.get("visual_mesh")
+        if not isinstance(stats, dict):
+            stats = {}
+        return os.path.join(self.directory, str(stats.get("file", "terrain_visual.obj")))
 
     def spawn_arguments(self) -> Tuple[float, float, float, float]:
         """``(x, y, z, yaw)`` for ``ros_gz_sim create``."""
@@ -189,6 +199,14 @@ def generate(
         print(f"[cat_arena] seed {master}: {len(layout.boulders)} boulders, "
               f"{len(layout.craters)} craters")
 
+    # -- 1b. procedural rock meshes (visuals for the boulders) -----------
+    # Collision stays a sphere; the visual is an irregular procedural mesh.
+    rock_palette = getattr(cfg, "appearance", None)
+    rock_palette = list(getattr(rock_palette, "rock_color_palette", None) or
+                        ["#B4733F", "#C9A27A", "#8A5A33", "#A0522D"])
+    rock_meshes = write_rock_meshes(target, layout.boulders, master, rock_palette)
+    rock_assets = {bid: os.path.join(target, fname) for bid, fname in rock_meshes.items()}
+
     # -- 2. terrain (heightmap with craters) -------------------------------
     # Get flat zones for masking
     flat_zone_names = ['start', 'construction', 'berm_target', 'left_corridor']
@@ -203,6 +221,15 @@ def generate(
     hm_path = os.path.join(target, hm_filename)
     terrain_stats: Dict[str, Any] = write_heightmap_png(hm_path, heightmap, 0.0, cfg.terrain.max_relief)
 
+    # Visual mesh for the same height field.  The visual cannot be an Ogre2
+    # heightmap: Terra always runs the TerraShadowGenerator compute shader,
+    # which fails on GL 4.1 devices without compute-shader support.
+    visual_mesh_file = "terrain_visual.obj"
+    mesh = build_mesh(cfg, field)
+    terrain_stats["visual_mesh"] = write_obj_mesh(
+        os.path.join(target, visual_mesh_file), cfg, mesh
+    )
+
     # Generate sand textures
     albedo_file: Optional[str] = None
     normal_file: Optional[str] = None
@@ -215,11 +242,59 @@ def generate(
             normal_file = texture_stats["normal"]["file"]
         terrain_stats.update(texture_stats)
 
+    # Stage C: blurred backdrop image beyond the walls.
+    background_stats = write_background_png(
+        os.path.join(target, "background.png"), size=2048, seed=master
+    )
+    background_file = background_stats["file"]
+
     assets = WorldAssets(
         heightmap_file=hm_filename,
         mtl_file=None,
         albedo_file=albedo_file,
         normal_file=normal_file,
+        visual_mesh_file=visual_mesh_file,
+        rock_meshes=rock_assets,
+        background_file=background_file,
+    )
+
+    # -- Stage D: per-seed lighting variation --------------------------------
+    # Sun elevation, intensity and tint vary within the documented ranges so
+    # different seeds look like different times of day / cloud cover, while the
+    # same seed reproduces byte-identical lighting.
+    light_rng = rng_numpy(master, "lighting")
+    elev_jitter = float(light_rng.uniform(-0.12, 0.12))   # radians of elevation
+    azim_jitter = float(light_rng.uniform(-0.18, 0.18))   # radians of azimuth
+    intensity = float(light_rng.uniform(0.85, 1.15))      # diffuse multiplier
+    tint = np.array(
+        [
+            float(light_rng.uniform(0.92, 1.08)),
+            float(light_rng.uniform(0.92, 1.08)),
+            float(light_rng.uniform(0.92, 1.08)),
+            1.0,
+        ],
+        dtype=float,
+    )
+    d = np.asarray(cfg.light.direction, dtype=float)
+    d = d / np.linalg.norm(d)
+    # rotate direction slightly around the vertical (azimuth) and tilt (elevation)
+    yaw = np.arctan2(d[1], d[0]) + azim_jitter
+    pitch = np.arcsin(np.clip(d[2], -1.0, 1.0)) + elev_jitter
+    pitch = float(np.clip(pitch, -1.45, -0.30))  # keep sun above the horizon
+    d_jit = np.array(
+        [
+            np.cos(pitch) * np.cos(yaw),
+            np.cos(pitch) * np.sin(yaw),
+            np.sin(pitch),
+        ],
+        dtype=float,
+    )
+    d_jit = d_jit / np.linalg.norm(d_jit)
+    light_cfg = replace(
+        cfg.light,
+        diffuse=tuple(float(min(1.0, c * intensity * t)) for c, t in zip(cfg.light.diffuse[:3], tint[:3])) + (1.0,),
+        specular=tuple(float(min(1.0, c * intensity * 0.6)) for c in cfg.light.specular[:3]) + (1.0,),
+        direction=tuple(float(c) for c in d_jit),
     )
 
     # -- 3. spawn pose -----------------------------------------------------
@@ -236,6 +311,7 @@ def generate(
         seed=master,
         include_overview_camera=overview_camera,
         include_robot_plugins=robot_plugins,
+        light_cfg=light_cfg,
     )
     world_path = os.path.join(target, "arena.sdf")
     with open(world_path, "w", encoding="utf-8") as handle:
@@ -250,10 +326,12 @@ def generate(
         "gz_sim": _gz_sim_version(),
     }
     files: Dict[str, Any] = {}
-    for name in ("arena.sdf", "height.png", "sand_diffuse.png", "sand_normal.png"):
+    for name in ("arena.sdf", "height.png", "background.png", "terrain_visual.obj", "sand_diffuse.png", "sand_normal.png"):
         candidate = os.path.join(target, name)
         if os.path.isfile(candidate):
             files[name] = {"bytes": os.path.getsize(candidate), "sha256": _sha256(candidate)}
+    for bid, path in sorted(rock_assets.items()):
+        files[os.path.basename(path)] = {"bytes": os.path.getsize(path), "sha256": _sha256(path)}
 
     # Create minimal mesh-like object for ground truth compatibility
     class MockMesh:

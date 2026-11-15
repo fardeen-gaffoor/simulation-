@@ -25,9 +25,13 @@ ament_python_install_package(${PROJECT_NAME})
 #   ros2 run rover_description stub_topics.py
 # --------------------------------------------------------------------------- #
 install(PROGRAMS
-  scripts/generate_robot.py
   scripts/check_envelope.py
+  scripts/check_geometry.py
+  scripts/generate_robot.py
   scripts/mass_budget.py
+  scripts/mass_budget_cg.py
+  scripts/motor_analysis.py
+  scripts/skid_steer_controller.py
   scripts/simple_drive.py
   scripts/teleop_keyboard.py
   scripts/stub_topics.py

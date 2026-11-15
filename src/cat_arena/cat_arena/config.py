@@ -33,6 +33,8 @@ __all__ = [
     "CratersCfg",
     "MarkerPlacement",
     "MarkersCfg",
+    "PropDef",
+    "PropsCfg",
     "StartPoseCfg",
     "OverviewCameraCfg",
     "ArenaConfig",
@@ -255,6 +257,33 @@ class CratersCfg:
 
 
 @dataclass(frozen=True)
+class PropDef:
+    """One toggleable arena prop (Stage C)."""
+
+    enabled: bool
+    shape: str            # "box" or "cylinder"
+    size: Optional[Tuple[float, float, float]] = None   # box: [x, y, z]
+    radius: Optional[float] = None                      # cylinder radius (m)
+    height: Optional[float] = None                      # cylinder height (m)
+    color: Tuple[float, float, float, float] = (0.8, 0.8, 0.8, 1.0)
+    stripe_color: Optional[Tuple[float, float, float, float]] = None
+    position: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    zone: str = "obstacle"
+    static: bool = True
+
+
+@dataclass(frozen=True)
+class PropsCfg:
+    """Collection of toggleable arena props."""
+
+    enabled: bool
+    berm_board: PropDef
+    small_white_box: PropDef
+    yellow_black_box: PropDef
+    white_pole: PropDef
+
+
+@dataclass(frozen=True)
 class MarkerPlacement:
     marker_id: int
     mount: str
@@ -304,11 +333,13 @@ class OverviewCameraCfg:
 
 @dataclass(frozen=True)
 class LightCfg:
-    """The single directional ``sun`` light.
+    """The directional ``sun`` light plus an optional soft fill light.
 
     Parameterized (rather than hard-coded) so that module 3 can randomize
     lighting per dataset scene by writing an arena.yaml override.  The
-    defaults reproduce the original hard-coded light exactly.
+    defaults reproduce the original hard-coded light exactly.  The optional
+    fill light mimics tent-diffused illumination: a large, soft, low-intensity
+    source that lifts shadows without a strong direction.
     """
 
     name: str
@@ -318,6 +349,10 @@ class LightCfg:
     specular: Tuple[float, float, float, float]
     direction: Tuple[float, float, float]
     attenuation: Tuple[float, float, float, float]
+    fill_enabled: bool = False
+    fill_pose: Tuple[float, float, float, float, float, float] = (4.5, 2.5, 8.0, 0.0, 0.0, 0.0)
+    fill_diffuse: Tuple[float, float, float, float] = (0.30, 0.33, 0.38, 1.0)
+    fill_specular: Tuple[float, float, float, float] = (0.05, 0.05, 0.05, 1.0)
 
 
 @dataclass(frozen=True)
@@ -357,6 +392,7 @@ class ArenaConfig:
     overview_camera: OverviewCameraCfg
     light: LightCfg
     scene: SceneCfg
+    props: PropsCfg
     assumptions: List[str] = field(default_factory=list)
 
     # -- convenience ------------------------------------------------------- #
@@ -559,6 +595,111 @@ def _parse_craters(section: Dict[str, Any]) -> CratersCfg:
     return cfg
 
 
+_PROP_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    "berm_board": {
+        "enabled": True,
+        "shape": "box",
+        "size": [1.2, 0.6, 0.02],
+        "color": [0.910, 0.761, 0.106, 1.0],
+        "position": [1.0, 0.75, 0.01],
+        "zone": "berm_target",
+        "static": True,
+    },
+    "small_white_box": {
+        "enabled": True,
+        "shape": "box",
+        "size": [0.35, 0.35, 0.35],
+        "color": [0.95, 0.95, 0.95, 1.0],
+        "position": [5.5, 2.5, 0.175],
+        "zone": "obstacle",
+        "static": True,
+    },
+    "yellow_black_box": {
+        "enabled": True,
+        "shape": "box",
+        "size": [0.4, 0.4, 0.4],
+        "color": [1.0, 0.843, 0.0, 1.0],
+        "stripe_color": [0.05, 0.05, 0.05, 1.0],
+        "position": [3.5, 1.0, 0.2],
+        "zone": "obstacle",
+        "static": True,
+    },
+    "white_pole": {
+        "enabled": True,
+        "shape": "cylinder",
+        "radius": 0.025,
+        "height": 1.75,
+        "color": [0.95, 0.95, 0.95, 1.0],
+        "position": [4.5, 2.5, 0.875],
+        "zone": "obstacle",
+        "static": True,
+    },
+}
+
+
+def _parse_props(section: Dict[str, Any]) -> PropsCfg:
+    """Parse the optional ``props`` section (Stage C).
+
+    Arena.yaml may omit ``props`` entirely or list per-prop overrides; any
+    missing field falls back to the built-in defaults above (mirrored in
+    ``config/props.yaml``).
+    """
+
+    def _prop(name: str) -> PropDef:
+        defaults = dict(_PROP_DEFAULTS[name])
+        raw = dict(section.get(name, {})) if isinstance(section.get(name), dict) else {}
+        # merge overrides on top of defaults
+        merged = dict(defaults)
+        merged.update(raw)
+        enabled = bool(merged.get("enabled", True))
+        shape = str(merged.get("shape", "box"))
+        if shape not in ("box", "cylinder"):
+            raise ConfigError(f"props.{name}.shape: '{shape}' must be 'box' or 'cylinder'")
+        size: Optional[Tuple[float, float, float]] = None
+        radius: Optional[float] = None
+        height: Optional[float] = None
+        if shape == "box":
+            size = tuple(_as_float_list(_require(merged, "size", f"props.{name}"), f"props.{name}.size", 3))
+            if any(s <= 0 for s in size):
+                raise ConfigError(f"props.{name}.size: all dimensions must be > 0")
+        else:
+            radius = _as_float(_require(merged, "radius", f"props.{name}"), f"props.{name}.radius")
+            height = _as_float(_require(merged, "height", f"props.{name}"), f"props.{name}.height")
+            if radius <= 0 or height <= 0:
+                raise ConfigError(f"props.{name}: radius and height must be > 0")
+        color = _parse_color(merged.get("color", [0.8, 0.8, 0.8, 1.0]), f"props.{name}.color")
+        stripe_color = None
+        if merged.get("stripe_color") is not None:
+            stripe_color = _parse_color(merged.get("stripe_color"), f"props.{name}.stripe_color")
+        position = tuple(
+            _as_float_list(_require(merged, "position", f"props.{name}"), f"props.{name}.position", 3)
+        )
+        zone = str(merged.get("zone", "obstacle"))
+        static = bool(merged.get("static", True))
+        return PropDef(
+            enabled=enabled,
+            shape=shape,
+            size=size,
+            radius=radius,
+            height=height,
+            color=color,
+            stripe_color=stripe_color,
+            position=position,
+            zone=zone,
+            static=static,
+        )
+
+    props_raw = dict(section) if isinstance(section, dict) else {}
+    enabled = bool(props_raw.get("enabled", True))
+    return PropsCfg(
+        enabled=enabled,
+        berm_board=_prop("berm_board"),
+        small_white_box=_prop("small_white_box"),
+        yellow_black_box=_prop("yellow_black_box"),
+        white_pole=_prop("white_pole"),
+    )
+
+
 def _validate_tiling(cfg: ArenaConfig) -> None:
     """The tiling zones must exactly partition the arena rectangle."""
     tiling = cfg.tiling_zones()
@@ -755,6 +896,7 @@ def _parse(cfg_raw: Dict[str, Any], path: str) -> ArenaConfig:
     assumptions: List[str] = []
     boulders = _parse_boulders(dict(_require(cfg_raw, "boulders", path)))
     craters = _parse_craters(dict(_require(cfg_raw, "craters", path)))
+    props = _parse_props(dict(cfg_raw.get("props", {})))
     markers = _parse_markers(dict(cfg_raw.get("markers", {})), assumptions)
     start_pose = _parse_start_pose(dict(_require(cfg_raw, "start_pose", path)))
 
@@ -777,6 +919,7 @@ def _parse(cfg_raw: Dict[str, Any], path: str) -> ArenaConfig:
         raise ConfigError("overview_camera.update_rate must be > 0")
 
     light_raw = dict(cfg_raw.get("light", {}))
+    fill_raw = dict(light_raw.get("fill_light", {}))
     light = LightCfg(
         name=str(light_raw.get("name", "sun")),
         cast_shadows=bool(light_raw.get("cast_shadows", True)),
@@ -791,6 +934,10 @@ def _parse(cfg_raw: Dict[str, Any], path: str) -> ArenaConfig:
                 light_raw.get("attenuation", [1000.0, 0.9, 0.01, 0.001]), "light.attenuation", 4
             )
         ),
+        fill_enabled=bool(fill_raw.get("enabled", False)),
+        fill_pose=tuple(_as_float_list(fill_raw.get("pose", [4.5, 2.5, 8.0, 0.0, 0.0, 0.0]), "light.fill_light.pose", 6)),
+        fill_diffuse=_parse_color(fill_raw.get("diffuse", [0.30, 0.33, 0.38, 1.0]), "light.fill_light.diffuse"),
+        fill_specular=_parse_color(fill_raw.get("specular", [0.05, 0.05, 0.05, 1.0]), "light.fill_light.specular"),
     )
     if sum(abs(v) for v in light.direction) <= 0.0:
         raise ConfigError("light.direction must be a non-zero vector")
@@ -829,6 +976,7 @@ def _parse(cfg_raw: Dict[str, Any], path: str) -> ArenaConfig:
         overview_camera=ov,
         light=light,
         scene=scene,
+        props=props,
         assumptions=assumptions,
     )
     if cfg.length_x <= 0 or cfg.width_y <= 0:

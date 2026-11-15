@@ -21,9 +21,12 @@ ament_python_install_package(${PROJECT_NAME})
 # command line tools -> lib/cat_arena/<name>.py  (ros2 run cat_arena <name>.py)
 # --------------------------------------------------------------------------- #
 install(PROGRAMS
+  scripts/compare_view.py
   scripts/env_check.py
   scripts/generate_arena.py
+  scripts/gen_sand.py
   scripts/publish_start_pose.py
+  scripts/postprocess_image.py
   scripts/render_overview.py
   scripts/spawn_robot.py
   DESTINATION lib/${PROJECT_NAME}

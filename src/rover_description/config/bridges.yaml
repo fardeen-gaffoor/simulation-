@@ -43,3 +43,12 @@ bridges:
   # link (backend.kind: hardware in rover_excavation/config/excavation.yaml).
   - {ros_topic: /excavation/ladder_cmd, gz_topic: /excavation/ladder_cmd, ros_type: std_msgs/msg/Float64, gz_type: gz.msgs.Double, direction: ros_to_gz}
   - {ros_topic: /excavation/belt_cmd,   gz_topic: /excavation/belt_cmd,   ros_type: std_msgs/msg/Float64, gz_type: gz.msgs.Double, direction: ros_to_gz}
+
+  # --- skid-steer wheel velocity commands (ROS -> gz) ------------------------
+  # The skid_steer_controller publishes per-wheel velocity setpoints here;
+  # the gz joint controllers in urdf/rover.urdf.xacro listen on the same
+  # topics (via ros_gz_bridge) and drive the wheel joints directly.
+  - {ros_topic: /wheel/wheel_front_left/cmd_vel,  gz_topic: /wheel/wheel_front_left/cmd_vel,  ros_type: std_msgs/msg/Float64, gz_type: gz.msgs.Double, direction: ros_to_gz}
+  - {ros_topic: /wheel/wheel_front_right/cmd_vel, gz_topic: /wheel/wheel_front_right/cmd_vel, ros_type: std_msgs/msg/Float64, gz_type: gz.msgs.Double, direction: ros_to_gz}
+  - {ros_topic: /wheel/wheel_rear_left/cmd_vel,   gz_topic: /wheel/wheel_rear_left/cmd_vel,   ros_type: std_msgs/msg/Float64, gz_type: gz.msgs.Double, direction: ros_to_gz}
+  - {ros_topic: /wheel/wheel_rear_right/cmd_vel,  gz_topic: /wheel/wheel_rear_right/cmd_vel,  ros_type: std_msgs/msg/Float64, gz_type: gz.msgs.Double, direction: ros_to_gz}

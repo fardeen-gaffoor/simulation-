@@ -17,7 +17,8 @@ def test_load(bridges_path):
     bridges = load_bridges(bridges_path)
     # 4 image + 4 camera_info + imu + odom + tf + joint_states + cmd_vel
     # + ladder_cmd + belt_cmd (module 6's mechanism commands)
-    assert len(bridges) == 15
+    # + 4 wheel cmd_vel (Stage 2 skid-steer controller)
+    assert len(bridges) == 19
 
 
 def test_excavation_mechanism_bridges(bridges_path):

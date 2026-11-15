@@ -147,6 +147,33 @@ def _launch_setup(context, *args, **kwargs):
         gz_cmd.append("-s")
         if headless_rendering:
             gz_cmd.append("--headless-rendering")
+    # -- inject sand_traction_plugin into world SDF -----------------------
+    world_text = open(world, "r").read()
+    if "gz-sim-sand-traction-system" not in world_text:
+        plugin_xml = (
+            '<plugin filename="gz-sim-sand-traction-system" name="gz::sim::v8::systems::SandTractionPlugin">\n'
+            '  <lookup_table_csv>/home/fewest/cat/tools/sandsim/results/s1_dry_sand/sand_traction_lookup.csv</lookup_table_csv>\n'
+            '  <wheel_joint_names>\n'
+            '    <joint>wheel_front_left_joint</joint>\n'
+            '    <joint>wheel_front_right_joint</joint>\n'
+            '    <joint>wheel_rear_left_joint</joint>\n'
+            '    <joint>wheel_rear_right_joint</joint>\n'
+            '  </wheel_joint_names>\n'
+            '  <mass_kg>50.0</mass_kg>\n'
+            '  <radius_m>0.10</radius_m>\n'
+            '  <width_m>0.06</width_m>\n'
+            '  <longitudinal_friction_mu>0.9</longitudinal_friction_mu>\n'
+            '  <lateral_friction_mu>0.3</lateral_friction_mu>\n'
+            '</plugin>\n'
+        )
+        world_text = world_text.replace("</world>", plugin_xml + "</world>", 1)
+        with open(world, "w") as f:
+            f.write(world_text)
+
+    os.environ["GAZEBO_PLUGIN_PATH"] = (
+        "/home/fewest/cat/install/sandsim_plugin/lib:"
+        + os.environ.get("GAZEBO_PLUGIN_PATH", "")
+    )
     gz_cmd.extend(["-r", world])
     actions.append(
         ExecuteProcess(cmd=gz_cmd, output="screen", on_exit=Shutdown(reason="gz sim exited"))
